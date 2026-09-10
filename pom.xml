@@ -1,0 +1,224 @@
+<?xml version="1.0"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<artifactId>fess-sso-saml</artifactId>
+	<packaging>jar</packaging>
+	<name>SAML SSO Plugin</name>
+	<version>15.9.0-SNAPSHOT</version>
+	<description>SAML 2.0 single sign-on support for Fess: the authenticator behind sso.type=saml, its assertion consumer service, SP metadata and single logout service.</description>
+	<scm>
+		<connection>scm:git:git@github.com:codelibs/fess-sso-saml.git</connection>
+		<developerConnection>scm:git:git@github.com:codelibs/fess-sso-saml.git</developerConnection>
+		<url>https://github.com/codelibs/fess-sso-saml</url>
+		<tag>HEAD</tag>
+	</scm>
+	<parent>
+		<groupId>org.codelibs.fess</groupId>
+		<artifactId>fess-parent</artifactId>
+		<version>15.9.0-SNAPSHOT</version>
+		<relativePath />
+	</parent>
+	<build>
+		<plugins>
+			<plugin>
+				<artifactId>maven-compiler-plugin</artifactId>
+			</plugin>
+			<plugin>
+				<artifactId>maven-source-plugin</artifactId>
+			</plugin>
+			<plugin>
+				<artifactId>maven-jar-plugin</artifactId>
+				<configuration>
+					<archive>
+						<manifest>
+							<addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+						</manifest>
+						<manifestEntries>
+							<!-- Mounts this jar into the webapp class loader (FessWebResourceRoot). The
+							     authenticator is built by the webapp container only: fess_sso.xml, and with
+							     it the fess_sso++.xml this jar contributes, is included from app.xml and from
+							     no other Di xml, so the crawler, thumbnail, suggest and chunk processes never
+							     see this component at all. Without this entry the login flow cannot reach it. -->
+							<Fess-WebAppJar>true</Fess-WebAppJar>
+						</manifestEntries>
+					</archive>
+				</configuration>
+			</plugin>
+			<plugin>
+				<artifactId>maven-shade-plugin</artifactId>
+				<executions>
+					<execution>
+						<phase>package</phase>
+						<goals>
+							<goal>shade</goal>
+						</goals>
+						<configuration>
+							<createDependencyReducedPom>false</createDependencyReducedPom>
+							<!-- No relocation. Santuario reads its own algorithm registry out of
+							     resource/config.xml under org/apache/xml/security and instantiates every
+							     entry by name, and Fess's log configuration addresses org.codelibs.saml2 as
+							     a logger name. Relocating would break both. -->
+							<artifactSet>
+								<!-- What the war already carries. Declaring org.codelibs.fess:fess as provided
+								     does not keep the first five out on its own: when Fess and java-saml need the
+								     same artifact, Maven keeps Fess's version but widens the scope to the widest
+								     of the two, so the node arrives at compile or runtime instead of provided and
+								     would be shaded.
+								     Measured with `mvn -o dependency:list -DincludeScope=runtime`, which is the
+								     same artifact set the shade plugin works from. It answers nine artifacts,
+								     and five of them the war still ships at the very same version: slf4j-api,
+								     corelib, commons-codec and commons-lang3 are direct dependencies of Fess,
+								     and commons-text arrives there with fess-crawler and handlebars, so none of
+								     the five leaves the war together with java-saml. WEB-INF/lib precedes
+								     WEB-INF/plugin on every class path Fess builds, so a shaded copy would never
+								     be read anyway.
+								     woodstox-core is the sixth, and the only entry here that is not simply
+								     duplicate weight. xmlsec asks for it at runtime for its StAX API
+								     (org.apache.xml.security.stax), and java-saml 3.1.2 uses only the DOM one:
+								     its class constants name org.apache.xml.security.{encryption, exceptions,
+								     keys, signature, transforms, utils} and neither javax/xml/stream nor stax2 nor
+								     com/ctc/wstx. Shading it would be 1063 of 1940 jar entries for classes
+								     nothing here can reach, and it would also bring
+								     META-INF/services/javax.xml.stream.XMLInputFactory: with woodstox-core gone
+								     from the war (it is there today only by way of google-cloud-storage, and the
+								     GCS backend is a candidate to be split out in turn), this plugin would
+								     become the only StAX provider announced to the whole webapp while stax2-api,
+								     which arrives provided from that same google-cloud-storage and is therefore
+								     not shaded, went with it. XMLInputFactory.newFactory() then fails with
+								     ClassNotFoundException: org.codehaus.stax2.XMLInputFactory2 for every caller
+								     in the webapp, not only for SAML. Measured both ways against a class path
+								     built from a real WEB-INF: with no woodstox anywhere, the SP metadata, its
+								     schema validation and the LogoutRequest NameID all still work and StAX falls
+								     back to the JDK implementation.
+								     That leaves java-saml, java-saml-core and xmlsec shaded in.
+								     jakarta.xml.bind-api needs no exclusion here even though Fess excludes it
+								     from java-saml: xmlsec declares it provided, so it never reaches a consumer. -->
+								<excludes>
+									<exclude>com.fasterxml.woodstox:woodstox-core</exclude>
+									<exclude>commons-codec:*</exclude>
+									<exclude>org.apache.commons:commons-lang3</exclude>
+									<exclude>org.apache.commons:commons-text</exclude>
+									<exclude>org.codelibs:corelib</exclude>
+									<exclude>org.slf4j:*</exclude>
+								</excludes>
+							</artifactSet>
+							<filters>
+								<filter>
+									<artifact>*:*</artifact>
+									<excludes>
+										<exclude>META-INF/*.SF</exclude>
+										<exclude>META-INF/*.DSA</exclude>
+										<exclude>META-INF/*.RSA</exclude>
+										<exclude>module-info.class</exclude>
+									</excludes>
+								</filter>
+							</filters>
+							<transformers>
+								<transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer" />
+							</transformers>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<artifactId>maven-javadoc-plugin</artifactId>
+			</plugin>
+			<plugin>
+				<groupId>com.mycila</groupId>
+				<artifactId>license-maven-plugin</artifactId>
+			</plugin>
+			<plugin>
+				<groupId>net.revelc.code.formatter</groupId>
+				<artifactId>formatter-maven-plugin</artifactId>
+			</plugin>
+		</plugins>
+	</build>
+	<!-- Fess plugins are distributed through maven.codelibs.org instead of Maven Central.
+	     This cannot be inherited from fess-parent: distributionManagement is inherited
+	     unconditionally, so declaring it there would also redirect the SNAPSHOT
+	     deployments of fess-parent, fess, fess-crawler, fess-crawler-playwright and
+	     fess-suggest, which stay on Maven Central. The scpexe transport comes from
+	     the wagon-ssh-external build extension inherited from fess-parent. -->
+	<distributionManagement>
+		<repository>
+			<id>codelibs-repo</id>
+			<name>CodeLibs Repository</name>
+			<url>scpexe://maven.codelibs.org/var/www/maven/release</url>
+		</repository>
+		<snapshotRepository>
+			<id>codelibs-snapshots</id>
+			<name>CodeLibs Snapshot Repository</name>
+			<url>scpexe://maven.codelibs.org/var/www/maven/snapshot</url>
+		</snapshotRepository>
+	</distributionManagement>
+	<repositories>
+		<repository>
+			<id>snapshots.central.sonatype.com</id>
+			<url>https://central.sonatype.com/repository/maven-snapshots</url>
+			<releases>
+				<enabled>false</enabled>
+			</releases>
+			<snapshots>
+				<enabled>true</enabled>
+			</snapshots>
+		</repository>
+	</repositories>
+	<dependencies>
+		<!-- Declared before java-saml on purpose: Fess's own dependencies then arrive as
+		     provided transitive nodes, and most of what the war carries is therefore left out of
+		     the shade. Ordering does not settle every case: where the two paths disagree Maven
+		     keeps one node and widens its scope, and those arrive at compile or runtime instead.
+		     That is what the exclude list above is for. -->
+		<dependency>
+			<groupId>org.codelibs.fess</groupId>
+			<artifactId>fess</artifactId>
+			<version>${fess.version}</version>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>jakarta.annotation</groupId>
+			<artifactId>jakarta.annotation-api</artifactId>
+			<version>${jakarta.annotation.api.version}</version>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<!-- The authenticator reads the assertion off the HttpServletRequest and stores the
+			     pending AuthnRequest IDs in the HttpSession. Neither Fess nor java-saml passes this
+			     on (both declare it provided), so it has to be named here.
+			     provided, not shaded: the servlet container supplies it, and the webapp is the only
+			     place this component is ever built (see the manifest entry above). init() touches no
+			     servlet type, so the class also loads in a process that has none. -->
+			<groupId>jakarta.servlet</groupId>
+			<artifactId>jakarta.servlet-api</artifactId>
+			<version>${jakarta.servlet.api.version}</version>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.codelibs</groupId>
+			<artifactId>java-saml</artifactId>
+			<version>${java.saml.version}</version>
+		</dependency>
+		<dependency>
+			<!-- The mock servlet request, session and response the moved test drives the
+			     authenticator with, and the LastaDi container UnitFessTestCase stands up from
+			     src/test/resources/test_app.xml. Fess declares the same dependency at test scope,
+			     which is not transitive, so it is named again here. -->
+			<groupId>org.dbflute.utflute</groupId>
+			<artifactId>utflute-lastaflute</artifactId>
+			<version>${utflute.version}</version>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.junit.jupiter</groupId>
+			<artifactId>junit-jupiter-api</artifactId>
+			<version>${junit.jupiter.version}</version>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.junit.jupiter</groupId>
+			<artifactId>junit-jupiter-engine</artifactId>
+			<version>${junit.jupiter.version}</version>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
+</project>

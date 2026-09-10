@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE components PUBLIC "-//DBFLUTE//DTD LastaDi 1.0//EN"
+	"http://dbflute.org/meta/lastadi10.dtd">
+<components>
+	<!-- Merged into Fess's fess_sso.xml. SsoManager looks the authenticator up as
+	     "<sso.type>Authenticator", so this component name is what makes sso.type=saml work.
+	     A "++" file is additive and is collected from every jar on the class path, so this does not
+	     collide with another fess-sso-* plugin contributing its own authenticator.
+
+	     Singleton, not prototype: init() registers this instance with the SsoManager, and the
+	     per-session AuthnRequest IDs and the replay cache it holds have to be the same ones on the
+	     request that answers the IdP. -->
+	<component name="samlAuthenticator" class="org.codelibs.fess.sso.saml.SamlAuthenticator">
+		<!-- Tunable with no saml.* configuration key. Uncomment to override the default.
+		     How long an unanswered AuthnRequest ID stays usable is saml.request.id.ttl instead.
+		<property name="maxRequestIds">10</property>
+		-->
+	</component>
+</components>
