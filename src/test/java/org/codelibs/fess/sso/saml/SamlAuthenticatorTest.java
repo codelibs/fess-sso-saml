@@ -36,6 +36,7 @@ import org.codelibs.core.misc.DynamicProperties;
 import org.codelibs.fess.app.web.base.login.ActionResponseCredential;
 import org.codelibs.fess.sso.saml.SamlCredential.SamlUser;
 import org.codelibs.fess.entity.FessUser;
+import org.codelibs.fess.exception.SsoLoginException;
 import org.codelibs.fess.exception.SsoMessageException;
 import org.codelibs.fess.exception.SsoStateException;
 import org.codelibs.fess.helper.SystemHelper;
@@ -564,6 +565,39 @@ public class SamlAuthenticatorTest extends UnitFessTestCase {
         } finally {
             tearDownIdp(systemProperties);
         }
+    }
+
+    @Test
+    public void test_getLoginCredential_reportsAnInvalidIdpConfigurationAsARejectedRequest() throws Exception {
+        // Every anonymous GET /sso/ reaches the AuthnRequest of an unconfigured server, and
+        // SsoAction logs an SsoStateException as one line where it logs anything else with a stack
+        // trace. It does not log the cause, so the settings java-saml names have to be in the message.
+        final SamlAuthenticator authenticator = createAuthenticatorWithControlledClock();
+        getMockRequest();
+
+        final SsoStateException e =
+                org.junit.jupiter.api.Assertions.assertThrows(SsoStateException.class, authenticator::getLoginCredential);
+
+        assertTrue(e.getMessage(), e.getMessage().contains("idp_sso_url_invalid"));
+        assertFalse(e.getMessage(), e.getMessage().matches("(?s).*[\\r\\n].*"));
+    }
+
+    @Test
+    public void test_getLoginCredential_keepsTheStackTraceOfAnUnexpectedFailureToStartALogin() throws Exception {
+        // Only the configuration is the operator's mistake to read off one line. Anything else
+        // that stops the AuthnRequest is a fault of this server.
+        final SamlAuthenticator authenticator = new SamlAuthenticator() {
+            @Override
+            protected Saml2Settings getSettings() {
+                throw new IllegalStateException("settings could not be built");
+            }
+        };
+        getMockRequest();
+
+        final SsoLoginException e =
+                org.junit.jupiter.api.Assertions.assertThrows(SsoLoginException.class, authenticator::getLoginCredential);
+
+        assertFalse(e.toString(), e instanceof SsoStateException);
     }
 
     @Test
@@ -2021,5 +2055,6 @@ public class SamlAuthenticatorTest extends UnitFessTestCase {
         public String[] getPermissions() {
             return new String[0];
         }
+
     }
 }

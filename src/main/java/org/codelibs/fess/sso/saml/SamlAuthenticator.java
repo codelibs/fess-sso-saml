@@ -50,6 +50,7 @@ import org.codelibs.fess.util.ComponentUtil;
 import org.codelibs.saml2.Auth;
 import org.codelibs.saml2.core.authn.AuthnRequestParams;
 import org.codelibs.saml2.core.exception.SAMLException;
+import org.codelibs.saml2.core.exception.SettingsException;
 import org.codelibs.saml2.core.exception.ValidationException;
 import org.codelibs.saml2.core.logout.LogoutRequest;
 import org.codelibs.saml2.core.logout.LogoutRequestParams;
@@ -574,6 +575,11 @@ public class SamlAuthenticator implements SsoAuthenticator {
                 final String loginUrl = auth.login(null, authnRequestParams, true);
                 storeRequestIdInSession(request.getSession(), auth.getLastRequestId());
                 return new ActionResponseCredential(() -> HtmlResponse.fromRedirectPathAsIs(loginUrl));
+            } catch (final SettingsException e) {
+                // An SsoStateException: any anonymous request to /sso/ reaches this on a server whose IdP
+                // settings are not complete, and SsoAction logs anything else with a stack trace. It does
+                // not log the cause, so the settings that java-saml names go into the message.
+                throw new SsoStateException("Failed to start a SAML login: " + describeSamlFailure(e), e);
             } catch (final Exception e) {
                 throw new SsoLoginException("Invalid SAML redirect URL.", e);
             }
