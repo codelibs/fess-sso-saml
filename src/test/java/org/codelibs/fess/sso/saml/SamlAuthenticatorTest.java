@@ -804,6 +804,62 @@ public class SamlAuthenticatorTest extends UnitFessTestCase {
         }
     }
 
+    /**
+     * A StatusCode value as an anonymous sender can write it: character references survive XML
+     * attribute-value normalisation, so CR, LF, NEL, LS and PS reach java-saml intact, followed by
+     * enough filler to show the length is not bounded either.
+     */
+    private static final String FORGED_STATUS_CODE = "urn:x&#13;&#10;WARN forged line&#x85;&#x2028;&#x2029;end" + "A".repeat(5000);
+
+    /** Asserts that a log or exception text cannot start a new log line and is not unbounded. */
+    private void assertSafeForLog(final String text, final int maxLength) {
+        for (final char c : text.toCharArray()) {
+            assertFalse("control or line-break character U+" + Integer.toHexString(c) + " in: " + text,
+                    Character.isISOControl(c) || c == ' ' || c == ' ');
+        }
+        assertTrue("text of " + text.length() + " characters exceeds " + maxLength, text.length() <= maxLength);
+    }
+
+    @Test
+    public void test_getLoginCredential_sanitizesTheStatusCodeTheSenderPutInTheLog() throws Exception {
+        // java-saml copies the StatusCode of a non-success response into getErrors() as it is
+        // written, and checks it before the InResponseTo comparison, so an anonymous POST of an
+        // unsigned response reaches this line with whatever the sender typed there.
+        final SamlAuthenticator authenticator = createAuthenticatorWithControlledClock();
+        final DynamicProperties systemProperties = ComponentUtil.getSystemProperties();
+        try {
+            setUpIdp(systemProperties);
+            systemProperties.setProperty("saml.security.want_xml_validation", "false");
+            final MockletHttpServletRequest request = getMockRequest();
+            authenticator.getLoginCredential();
+            final String requestId = pendingRequestIds(request.getSession(false)).iterator().next();
+
+            final String xml = "<samlp:Response xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\""
+                    + " xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"_response\" Version=\"2.0\""
+                    + " IssueInstant=\"2026-01-01T00:00:00Z\" InResponseTo=\"" + requestId + "\">"
+                    + "<samlp:Status><samlp:StatusCode Value=\"" + FORGED_STATUS_CODE + "\"/></samlp:Status></samlp:Response>";
+            request.setMethod("POST");
+            request.setParameter("SAMLResponse", Base64.getEncoder().encodeToString(xml.getBytes(StandardCharsets.UTF_8)));
+
+            final LogCapturingAppender appender = LogCapturingAppender.attach(SamlAuthenticator.class);
+            try {
+                assertNull(authenticator.getLoginCredential());
+
+                assertEquals(1, appender.warnings().size(), String.valueOf(appender.warnings()));
+                final String failure = appender.warnings().get(0);
+                assertTrue(failure, failure.startsWith("Authentication Failure: "));
+                assertTrue(failure, failure.contains("WARN forged line"));
+                // the errors and the reason are each bounded at MAX_LOGGED_FAILURE_REASON_LENGTH
+                assertSafeForLog(failure, 2 * (SamlAuthenticator.MAX_LOGGED_FAILURE_REASON_LENGTH + 3) + 100);
+            } finally {
+                appender.detach();
+            }
+        } finally {
+            systemProperties.remove("saml.security.want_xml_validation");
+            tearDownIdp(systemProperties);
+        }
+    }
+
     @Test
     public void test_getLoginCredential_answersTheOlderOfTwoPendingRequestIds() throws Exception {
         final SamlAuthenticator authenticator = createAuthenticatorWithControlledClock();
@@ -1493,6 +1549,33 @@ public class SamlAuthenticatorTest extends UnitFessTestCase {
         } finally {
             systemProperties.remove("saml.idp.single_logout_service.url");
             tearDownIdp(systemProperties);
+        }
+    }
+
+    @Test
+    public void test_getLogoutResponse_sanitizesTheStatusCodeOfAnUnsignedLogoutResponse() throws Exception {
+        // The message of the exception is what SsoAction.logout writes to the log, and java-saml
+        // puts the StatusCode of a failed LogoutResponse into getErrors() as the sender wrote it.
+        final SamlAuthenticator authenticator = createAuthenticator();
+        final DynamicProperties systemProperties = ComponentUtil.getSystemProperties();
+        try {
+            setUpSlo(systemProperties);
+            final MockletHttpServletRequest request = getMockRequest();
+            final String xml = "<samlp:LogoutResponse xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\""
+                    + " xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"_logoutresponse\" Version=\"2.0\""
+                    + " IssueInstant=\"2026-01-01T00:00:00Z\"><saml:Issuer>https://idp.example.com/metadata</saml:Issuer>"
+                    + "<samlp:Status><samlp:StatusCode Value=\"" + FORGED_STATUS_CODE + "\"/></samlp:Status></samlp:LogoutResponse>";
+            request.setParameter("SAMLResponse", Base64.getEncoder().encodeToString(xml.getBytes(StandardCharsets.UTF_8)));
+
+            authenticator.getResponse(SsoResponseType.LOGOUT);
+            fail("SsoMessageException should be thrown");
+        } catch (final SsoMessageException e) {
+            assertTrue(String.valueOf(e.getCause()), e.getCause() instanceof SsoStateException);
+            final String message = e.getCause().getMessage();
+            assertTrue(message, message.contains("WARN forged line"));
+            assertSafeForLog(message, SamlAuthenticator.MAX_LOGGED_FAILURE_REASON_LENGTH + 3);
+        } finally {
+            tearDownSlo(systemProperties);
         }
     }
 

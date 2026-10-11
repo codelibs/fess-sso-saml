@@ -675,7 +675,9 @@ public class SamlAuthenticator implements SsoAuthenticator {
             logUnmatchedSamlResponse(requestIdMap.size());
             return null;
         }
-        final String errors = String.join(", ", lastAuth.getErrors());
+        // java-saml adds the StatusCode and SubStatusCode of a non-success response to the errors
+        // exactly as the sender wrote them, and checks them before anything is authenticated.
+        final String errors = sanitizeForLog(String.join(", ", lastAuth.getErrors()), MAX_LOGGED_FAILURE_REASON_LENGTH);
         // The reason is reported whatever saml.debug is set to. getErrors() answers a category --
         // "invalid_response" for a bad signature, an expired assertion, a foreign audience and a
         // replay alike -- so on its own it tells an administrator only that the login failed. The
@@ -1309,7 +1311,9 @@ public class SamlAuthenticator implements SsoAuthenticator {
                     // this is a rejected request rather than a fault: an SsoStateException gets it
                     // logged without a stack trace, the way getLoginCredential already treats a
                     // callback it did not start.
-                    final String msg = String.join(", ", errors);
+                    // The errors can carry the StatusCode of an unsigned LogoutResponse as the
+                    // sender wrote it, and SsoAction logs this message verbatim.
+                    final String msg = sanitizeForLog(String.join(", ", errors), MAX_LOGGED_FAILURE_REASON_LENGTH);
                     throw processFailure("Failed to log out.", msg, new SsoStateException(msg));
                 }
                 if (StringUtil.isNotBlank(redirectUrl)) {
