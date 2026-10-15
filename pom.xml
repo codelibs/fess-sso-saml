@@ -4,13 +4,13 @@
 	<artifactId>fess-sso-saml</artifactId>
 	<packaging>jar</packaging>
 	<name>SAML SSO Plugin</name>
-	<version>15.9.0-SNAPSHOT</version>
+	<version>15.9.0</version>
 	<description>SAML 2.0 single sign-on support for Fess: the authenticator behind sso.type=saml, its assertion consumer service, SP metadata and single logout service.</description>
 	<scm>
 		<connection>scm:git:git@github.com:codelibs/fess-sso-saml.git</connection>
 		<developerConnection>scm:git:git@github.com:codelibs/fess-sso-saml.git</developerConnection>
 		<url>https://github.com/codelibs/fess-sso-saml</url>
-		<tag>HEAD</tag>
+		<tag>fess-sso-saml-15.9.0</tag>
 	</scm>
 	<parent>
 		<groupId>org.codelibs.fess</groupId>
