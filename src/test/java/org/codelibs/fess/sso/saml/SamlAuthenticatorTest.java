@@ -2140,4 +2140,16 @@ public class SamlAuthenticatorTest extends UnitFessTestCase {
         }
 
     }
+
+    @Test
+    public void test_samlUserToString_keepsIdentityProviderValuesOnOneLine() throws Exception {
+        // the string form is what the debug log prints for a logged-in user, and a group name is
+        // whatever the identity provider released
+        final String forged = "evil\r\n2026-01-01 00:00:00,000 [main] ERROR  FORGED";
+        final SamlUser user = new SamlUser("name\nid", "_sessionIndex", null, null, null, new String[] { forged }, new String[] { "r\ro" });
+        final String text = user.toString();
+        assertFalse(text, text.contains("\r") || text.contains("\n"));
+        assertTrue(text, text.contains("FORGED"));
+        assertTrue(text, text.contains("name?id"));
+    }
 }

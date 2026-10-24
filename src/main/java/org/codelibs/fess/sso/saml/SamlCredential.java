@@ -39,6 +39,9 @@ import org.lastaflute.web.login.credential.LoginCredential;
  */
 public class SamlCredential implements LoginCredential, FessCredential {
 
+    /** The longest value a string form keeps; permission names reach 255 characters. */
+    private static final int MAX_LOGGED_LENGTH = 512;
+
     private final Map<String, List<String>> attributes;
 
     private final String nameId;
@@ -66,7 +69,21 @@ public class SamlCredential implements LoginCredential, FessCredential {
 
     @Override
     public String toString() {
-        return "{" + getUserId() + "}";
+        return "{" + safe(getUserId()) + "}";
+    }
+
+    /**
+     * Makes a value the identity provider released safe to embed in a log message.
+     *
+     * @param value The value, which may be null.
+     * @return The value without control characters, or null.
+     */
+    private static String safe(final String value) {
+        return value == null ? null : SamlAuthenticator.sanitizeForLog(value, MAX_LOGGED_LENGTH);
+    }
+
+    private static String[] safe(final String[] values) {
+        return values == null ? null : Arrays.stream(values).map(SamlCredential::safe).toArray(String[]::new);
     }
 
     @Override
@@ -264,10 +281,10 @@ public class SamlCredential implements LoginCredential, FessCredential {
 
         @Override
         public String toString() {
-            return "SamlUser [groups=" + Arrays.toString(groups) + ", roles=" + Arrays.toString(roles) + ", permissions="
-                    + Arrays.toString(permissions) + ", nameId=" + nameId + ", sessionIndex=" + sessionIndex + ", nameIdFormat="
-                    + nameIdFormat + ", nameidNameQualifier=" + nameidNameQualifier + ", nameidSPNameQualifier=" + nameidSPNameQualifier
-                    + "]";
+            return "SamlUser [groups=" + Arrays.toString(safe(groups)) + ", roles=" + Arrays.toString(safe(roles)) + ", permissions="
+                    + Arrays.toString(safe(permissions)) + ", nameId=" + safe(nameId) + ", sessionIndex=" + safe(sessionIndex)
+                    + ", nameIdFormat=" + safe(nameIdFormat) + ", nameidNameQualifier=" + safe(nameidNameQualifier)
+                    + ", nameidSPNameQualifier=" + safe(nameidSPNameQualifier) + "]";
         }
 
     }
