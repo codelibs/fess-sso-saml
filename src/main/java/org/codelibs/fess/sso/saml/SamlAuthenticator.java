@@ -1138,7 +1138,14 @@ public class SamlAuthenticator implements SsoAuthenticator {
                             samlUser.getNameIdFormat(), samlUser.getNameidNameQualifier(), samlUser.getNameidSPNameQualifier());
                     return auth.logout(null, logoutRequestParams, true);
                 } catch (final Exception e) {
-                    logger.warn("Failed to logout from IdP: name={}", sanitizeForLog(String.valueOf(samlUser.getName())), e);
+                    // Every logout of a logged-in user reaches this while the IdP settings do not build, so
+                    // the warning is one line and the stack trace stays at debug level, as for the
+                    // other failures of this authenticator. The exception texts can quote a setting.
+                    logger.warn("Failed to logout from IdP: name={} - {}", sanitizeForLog(String.valueOf(samlUser.getName())),
+                            sanitizeForLog(describeSamlFailure(e), MAX_LOGGED_FAILURE_REASON_LENGTH));
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("Failed to logout from IdP.", e);
+                    }
                 }
                 return null;
             }).orElse(null);
