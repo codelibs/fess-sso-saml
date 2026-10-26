@@ -2152,4 +2152,43 @@ public class SamlAuthenticatorTest extends UnitFessTestCase {
         assertTrue(text, text.contains("FORGED"));
         assertTrue(text, text.contains("name?id"));
     }
+
+    @Test
+    public void test_logout_reportsAFailedSingleLogoutOnOneLine() throws Exception {
+        // The single logout starts from the session of a logged-in user, and it fails whenever the
+        // IdP settings no longer build. Each such logout would write a stack trace of dozens of
+        // frames, none of which says more than the exception chain does, so the WARN carries the
+        // chain on one line and the stack trace stays at debug level.
+        final SamlAuthenticator authenticator = createAuthenticator();
+        final DynamicProperties systemProperties = ComponentUtil.getSystemProperties();
+        final LogCapturingAppender appender = LogCapturingAppender.attach(SamlAuthenticator.class);
+        try {
+            setUpSlo(systemProperties);
+            systemProperties.remove("saml.idp.entityid");
+            getMockRequest();
+            final String nameId = "alice\n2099-01-01 00:00:00,000 [forged] ERROR FORGED";
+            final SamlUser user = new SamlUser(nameId, "_sessionIndex", null, null, null, new String[0], new String[0]);
+
+            assertNull(authenticator.logout(new FessUserBean(user)));
+
+            final List<LogEvent> warns = appender.eventsAt(Level.WARN)
+                    .stream()
+                    .filter(e -> e.getMessage().getFormattedMessage().contains("Failed to logout from IdP"))
+                    .toList();
+            assertEquals(appender.renderedEvents().toString(), 1, warns.size());
+            final LogEvent warn = warns.get(0);
+            final String message = warn.getMessage().getFormattedMessage();
+            assertNull(warn.getThrown(), message);
+            assertFalse(message, message.contains("\n") || message.contains("\r"));
+            assertTrue(message, message.contains("name=alice?2099"));
+            assertTrue(message, message.contains("SettingsException") && message.contains("idp_entityId_not_found"));
+            // the stack trace is still there for whoever turns debug on
+            assertTrue(appender.eventsAt(Level.DEBUG)
+                    .stream()
+                    .anyMatch(e -> e.getThrown() != null && e.getMessage().getFormattedMessage().contains("Failed to logout from IdP")));
+        } finally {
+            appender.detach();
+            tearDownSlo(systemProperties);
+        }
+    }
 }
