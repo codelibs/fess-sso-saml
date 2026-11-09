@@ -661,7 +661,20 @@ public class SamlAuthenticator implements SsoAuthenticator {
         Auth lastAuth = null;
         for (final String requestId : getCandidateRequestIds(requestIdMap)) {
             final Auth auth = createAuth(request, response);
-            auth.processResponse(requestId);
+            try {
+                auth.processResponse(requestId);
+            } catch (final NullPointerException e) {
+                // java-saml dereferences the Status of a response that has none, so a well-formed
+                // document of another kind (for example <foo/>) ends in a NullPointerException
+                // instead of a ValidationException. The endpoint is anonymous and the pending ID
+                // stays unconsumed, so the same request can be repeated for the whole TTL: it is a
+                // refused payload, reported on one line like the other refusals.
+                logger.warn("Authentication failed: {}", sanitizeForLog(describeSamlFailure(e), MAX_LOGGED_FAILURE_REASON_LENGTH));
+                if (logger.isDebugEnabled()) {
+                    logger.debug("Authentication failed.", e);
+                }
+                return null;
+            }
             if (auth.isAuthenticated()) {
                 requestIdMap.remove(requestId);
                 return createLoginCredential(request, response, auth);

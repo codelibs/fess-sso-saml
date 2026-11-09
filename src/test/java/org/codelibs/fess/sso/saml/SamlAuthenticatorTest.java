@@ -1089,6 +1089,35 @@ public class SamlAuthenticatorTest extends UnitFessTestCase {
     }
 
     @Test
+    public void test_getLoginCredential_responseWithoutStatusIsOneLine() throws Exception {
+        // <foo/> parses as XML, so it passes the checks that refuse a broken document, and the
+        // toolkit then dereferences a Status the document does not have.
+        final SamlAuthenticator authenticator = createAuthenticatorWithControlledClock();
+        final DynamicProperties systemProperties = ComponentUtil.getSystemProperties();
+        try {
+            setUpIdp(systemProperties);
+            final MockletHttpServletRequest request =
+                    postRawSamlResponse(authenticator, Base64.getEncoder().encodeToString("<foo/>".getBytes(StandardCharsets.UTF_8)));
+
+            final LogCapturingAppender appender = LogCapturingAppender.attach(SamlAuthenticator.class);
+            try {
+                assertNull(authenticator.getLoginCredential());
+
+                final List<LogEvent> warnEvents = appender.eventsAt(Level.WARN);
+                assertEquals(1, warnEvents.size(), String.valueOf(appender.warnings()));
+                assertTrue(appender.warnings().get(0),
+                        appender.warnings().get(0).startsWith("Authentication failed: NullPointerException"));
+                assertNull(warnEvents.get(0).getThrown(), String.valueOf(warnEvents.get(0).getThrown()));
+                assertEquals(1, pendingRequestIds(request.getSession(false)).size());
+            } finally {
+                appender.detach();
+            }
+        } finally {
+            tearDownIdp(systemProperties);
+        }
+    }
+
+    @Test
     public void test_getLoginCredential_nonSamlFailureKeepsItsStackTrace() throws Exception {
         final SamlAuthenticator authenticator = createAuthenticatorWithControlledClock();
         final DynamicProperties systemProperties = ComponentUtil.getSystemProperties();
