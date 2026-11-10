@@ -366,6 +366,24 @@ public class SamlAuthenticatorTest extends UnitFessTestCase {
     }
 
     @Test
+    public void test_getSettings_rejectMissingAudience() throws Exception {
+        final SamlAuthenticator authenticator = createAuthenticator();
+        final DynamicProperties systemProperties = ComponentUtil.getSystemProperties();
+        try {
+            // an assertion without an Audience is accepted unless the administrator opts in
+            assertFalse(authenticator.getSettings().isRejectMissingAudience());
+
+            systemProperties.setProperty("saml.security.reject_missing_audience", "true");
+            assertTrue(authenticator.getSettings().isRejectMissingAudience());
+
+            systemProperties.setProperty("saml.security.reject_missing_audience", "false");
+            assertFalse(authenticator.getSettings().isRejectMissingAudience());
+        } finally {
+            systemProperties.remove("saml.security.reject_missing_audience");
+        }
+    }
+
+    @Test
     public void test_getSettings_logsSecurityWarningsUntilTheyChange() throws Exception {
         final SamlAuthenticator authenticator = createAuthenticator();
         final DynamicProperties systemProperties = ComponentUtil.getSystemProperties();

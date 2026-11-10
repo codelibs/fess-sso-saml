@@ -60,6 +60,10 @@ on `saml.security.authnrequest_signed`, `saml.security.want_messages_signed` and
 `saml.security.want_assertions_signed` is worth doing in production; Fess reports the permissive
 defaults once as `assertions_and_messages_not_required_signed` at WARN when the settings are built.
 
+An assertion with no `Audience` is accepted by default; only one that names other audiences is
+rejected. Set `saml.security.reject_missing_audience` to `true` to reject it as well, which is what
+the SAML Web SSO profile expects of a bearer assertion.
+
 Those pass-through keys are read by scanning `system.properties`, so `-Dfess.system.saml....` does
 not reach them. It does reach `saml.request.id.ttl`, `saml.attribute.group.name`,
 `saml.attribute.role.name`, `saml.default.groups` and `saml.default.roles`, which are read through
