@@ -44,6 +44,7 @@ import org.codelibs.fess.exception.SsoProcessException;
 import org.codelibs.fess.exception.SsoStateException;
 import org.codelibs.fess.mylasta.action.FessUserBean;
 import org.codelibs.fess.sso.SsoAuthenticator;
+import org.codelibs.fess.session.SessionDataSerializer;
 import org.codelibs.fess.sso.SsoResponseType;
 import org.codelibs.fess.sso.saml.SamlCredential.SamlUser;
 import org.codelibs.fess.util.ComponentUtil;
@@ -213,6 +214,11 @@ public class SamlAuthenticator implements SsoAuthenticator {
     protected static final String SAML_STATE = "SAML_STATE";
 
     /**
+     * The name of the component of Fess that serializes the attributes of a session for the session store.
+     */
+    protected static final String SESSION_DATA_SERIALIZER = "sessionDataSerializer";
+
+    /**
      * The property key for the SAML SP base URL.
      */
     protected static final String SAML_SP_BASE_URL = "saml.sp.base.url";
@@ -275,10 +281,11 @@ public class SamlAuthenticator implements SsoAuthenticator {
      * Cache of processed assertion IDs, used to reject replayed assertions.
      *
      * <p><b>Note:</b> the cache is held in memory by this instance and is not shared in a
-     * multi-instance deployment. That is also why SAML SSO needs sticky sessions: the
+     * multi-instance deployment. Without the session store of Fess (sticky sessions) the
      * assertion has to reach the instance whose session holds the matching AuthnRequest ID.
-     * It is that ID check, not this cache, which rejects an assertion replayed to another
-     * instance; the cache catches a repeated POST within a single session.</p>
+     * With it ({@code FESS_SESSION_STORE=opensearch}) any instance can answer, because the
+     * pending IDs are shared. It is that ID check, not this cache, which rejects an assertion
+     * replayed to another instance; the cache catches a repeated POST within a single session.</p>
      */
     private final ReplayCache replayCache = new InMemoryReplayCache();
 
@@ -321,6 +328,32 @@ public class SamlAuthenticator implements SsoAuthenticator {
         }
         ComponentUtil.getSsoManager().register(this);
         defaultSettings = createDefaultSettings();
+        registerSessionSerializers();
+    }
+
+    /**
+     * Tells the session store of Fess, which keeps the HTTP sessions of several nodes in OpenSearch when
+     * {@code FESS_SESSION_STORE=opensearch} is set, how to write the user of a SAML login.
+     *
+     * <p>It has to run while the container initializes, before the store fixes the classes it knows, and it
+     * is harmless when the store is not selected: the serializer only remembers the registration. Without
+     * it the {@link SamlUser} of a session is not shared and the login holds on the node that handled it only.
+     * A failure is logged and never stops the authenticator from starting.</p>
+     *
+     * <p>Not registered, on purpose: {@link SamlCredential}, which holds the attributes of the assertion and
+     * is never kept in the session, and the pending AuthnRequest IDs ({@link #SAML_STATE}), a
+     * {@link ConcurrentHashMap} of strings and numbers that Fess can already write.</p>
+     */
+    protected void registerSessionSerializers() {
+        try {
+            if (!ComponentUtil.hasComponent(SESSION_DATA_SERIALIZER)) {
+                return;
+            }
+            final SessionDataSerializer serializer = ComponentUtil.getComponent(SESSION_DATA_SERIALIZER);
+            serializer.register(SamlUser.class, new SamlUserSerializer());
+        } catch (final RuntimeException e) {
+            logger.warn("The SAML user is not shared between nodes by the session store: {}", sanitizeForLog(String.valueOf(e)), e);
+        }
     }
 
     /**
@@ -527,7 +560,15 @@ public class SamlAuthenticator implements SsoAuthenticator {
                     removeExpiredRequestIds(requestIdMap);
                     if (!requestIdMap.isEmpty()) {
                         try {
-                            return processSamlResponse(request, response, requestIdMap);
+                            final LoginCredential credential = processSamlResponse(request, response, requestIdMap);
+                            if (credential != null) {
+                                // The ID is consumed. With a shared session store another request of this
+                                // session may have replaced the attribute by a newer copy meanwhile, and
+                                // that copy would still hold the ID and write it back. Putting the map
+                                // that was consumed from back makes the consumption the state that is stored.
+                                session.setAttribute(SAML_STATE, requestIdMap);
+                            }
+                            return credential;
                         } catch (final SAMLException e) {
                             // The assertion consumer service is anonymous, and a SAMLResponse that
                             // cannot be decoded or parsed is refused before the pending
@@ -928,6 +969,8 @@ public class SamlAuthenticator implements SsoAuthenticator {
             logger.debug("Storing AuthnRequest ID in session: {}", requestId);
         }
         requestIdMap.put(requestId, ComponentUtil.getSystemHelper().getCurrentTimeAsLong());
+        // see getLoginCredential: the map in hand must be the one the session holds when it is stored
+        session.setAttribute(SAML_STATE, requestIdMap);
     }
 
     /**
@@ -943,6 +986,17 @@ public class SamlAuthenticator implements SsoAuthenticator {
      * with a {@link ClassCastException} rather than a message; that single ID is carried over so
      * a login already in flight across the upgrade can still complete.</p>
      *
+     * <p>A map that the session store of Fess read back is checked the same way, because what it
+     * holds is whatever the store held: an entry that is not a non-blank ID with the time it was
+     * created is dropped, and only the newest {@link #maxRequestIds} entries are kept, so a damaged
+     * or oversized value cannot fail the login with a {@link ClassCastException} or make it sort
+     * an unbounded map. A map that needs no repair is returned as it is.</p>
+     *
+     * <p>{@code synchronized (session)} orders the requests of this session on this node only. When
+     * the sessions are shared between nodes every node has its own session object, so two nodes
+     * can still create the map, or consume the same ID, at the same moment; see
+     * the README for what that does and does not allow.</p>
+     *
      * @param session The HTTP session.
      * @return The AuthnRequest ID map held by the session, keyed by ID and valued with the time
      *         the ID was created.
@@ -950,8 +1004,15 @@ public class SamlAuthenticator implements SsoAuthenticator {
     protected Map<String, Long> getRequestIdMap(final HttpSession session) {
         synchronized (session) {
             final Object stored = session.getAttribute(SAML_STATE);
-            if (stored instanceof ConcurrentHashMap) {
-                return (Map<String, Long>) stored;
+            if (stored instanceof final ConcurrentHashMap<?, ?> storedMap) {
+                if (isValidRequestIdMap(storedMap)) {
+                    @SuppressWarnings("unchecked")
+                    final Map<String, Long> valid = (Map<String, Long>) storedMap;
+                    return valid;
+                }
+                final Map<String, Long> repaired = repairRequestIdMap(storedMap);
+                session.setAttribute(SAML_STATE, repaired);
+                return repaired;
             }
             final Map<String, Long> concurrentMap = new ConcurrentHashMap<>();
             if (stored instanceof final String requestId && StringUtil.isNotBlank(requestId)) {
@@ -960,6 +1021,39 @@ public class SamlAuthenticator implements SsoAuthenticator {
             session.setAttribute(SAML_STATE, concurrentMap);
             return concurrentMap;
         }
+    }
+
+    /**
+     * Tells whether every entry of a stored map is an ID with the time it was created, and the map is
+     * not larger than {@link #maxRequestIds}.
+     *
+     * @param map The map found in the session.
+     * @return true if it can be used as it is.
+     */
+    private boolean isValidRequestIdMap(final Map<?, ?> map) {
+        if (map.size() > maxRequestIds) {
+            return false;
+        }
+        return map.entrySet()
+                .stream()
+                .allMatch(e -> e.getKey() instanceof final String id && StringUtil.isNotBlank(id) && e.getValue() instanceof Long);
+    }
+
+    /**
+     * Copies the valid entries of a stored map, the newest {@link #maxRequestIds} of them.
+     *
+     * @param map The map found in the session.
+     * @return A new map.
+     */
+    private Map<String, Long> repairRequestIdMap(final Map<?, ?> map) {
+        final Map<String, Long> repaired = new ConcurrentHashMap<>();
+        map.entrySet()
+                .stream()
+                .filter(e -> e.getKey() instanceof final String id && StringUtil.isNotBlank(id) && e.getValue() instanceof Long)
+                .sorted(Comparator.comparingLong((final Map.Entry<?, ?> e) -> (Long) e.getValue()).reversed())
+                .limit(maxRequestIds)
+                .forEach(e -> repaired.put((String) e.getKey(), (Long) e.getValue()));
+        return repaired;
     }
 
     /**
@@ -972,7 +1066,8 @@ public class SamlAuthenticator implements SsoAuthenticator {
         final long requestIdTtl = getRequestIdTtl();
         requestIdMap.entrySet()
                 .stream()
-                .filter(e -> (now - e.getValue()) / 1000L > requestIdTtl)
+                // abs: a time ahead of this node's clock, from another node or a damaged value, must run out too
+                .filter(e -> Math.abs(now - e.getValue()) / 1000L > requestIdTtl)
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toList())
                 .forEach(requestId -> {
