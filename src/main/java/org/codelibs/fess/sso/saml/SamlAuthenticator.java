@@ -1318,6 +1318,11 @@ public class SamlAuthenticator implements SsoAuthenticator {
         }
     }
 
+    /**
+     * Builds the response that serves the service provider metadata as {@code metadata.xml}.
+     *
+     * @return the metadata response
+     */
     protected ActionResponse getMetadataResponse() {
         return LaRequestUtil.getOptionalRequest().map(request -> {
             if (logger.isDebugEnabled()) {
