@@ -1,0 +1,8 @@
+title = "fess-sso-saml"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Throwaway key pairs and certificates that the tests sign and encrypt with"
+paths = ['''src/test/resources/keys/''']

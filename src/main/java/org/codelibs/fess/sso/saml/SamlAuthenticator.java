@@ -17,11 +17,9 @@ package org.codelibs.fess.sso.saml;
 
 import java.io.OutputStreamWriter;
 import java.io.Writer;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.IdentityHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -35,7 +33,6 @@ import org.apache.logging.log4j.Logger;
 import org.codelibs.core.lang.StringUtil;
 import org.codelibs.core.misc.DynamicProperties;
 import org.codelibs.fess.app.web.base.login.ActionResponseCredential;
-import org.codelibs.fess.app.web.base.login.FessLoginAssist;
 import org.codelibs.fess.app.web.base.login.FessLoginAssist.LoginCredentialResolver;
 import org.codelibs.fess.crawler.Constants;
 import org.codelibs.fess.exception.SsoLoginException;
@@ -43,23 +40,21 @@ import org.codelibs.fess.exception.SsoMessageException;
 import org.codelibs.fess.exception.SsoProcessException;
 import org.codelibs.fess.exception.SsoStateException;
 import org.codelibs.fess.mylasta.action.FessUserBean;
-import org.codelibs.fess.sso.SsoAuthenticator;
 import org.codelibs.fess.session.SessionDataSerializer;
+import org.codelibs.fess.sso.SsoAuthenticator;
 import org.codelibs.fess.sso.SsoResponseType;
 import org.codelibs.fess.sso.saml.SamlCredential.SamlUser;
 import org.codelibs.fess.util.ComponentUtil;
-import org.codelibs.saml2.Auth;
-import org.codelibs.saml2.core.authn.AuthnRequestParams;
-import org.codelibs.saml2.core.exception.SAMLException;
-import org.codelibs.saml2.core.exception.SettingsException;
-import org.codelibs.saml2.core.exception.ValidationException;
-import org.codelibs.saml2.core.logout.LogoutRequest;
-import org.codelibs.saml2.core.logout.LogoutRequestParams;
-import org.codelibs.saml2.core.replay.InMemoryReplayCache;
-import org.codelibs.saml2.core.replay.ReplayCache;
-import org.codelibs.saml2.core.settings.Saml2Settings;
-import org.codelibs.saml2.core.settings.SettingsBuilder;
-import org.codelibs.saml2.core.util.Util;
+import org.codelibs.saml4j.InMemoryReplayCache;
+import org.codelibs.saml4j.LoginResult;
+import org.codelibs.saml4j.LoginStart;
+import org.codelibs.saml4j.LogoutOutcome;
+import org.codelibs.saml4j.NameId;
+import org.codelibs.saml4j.Reason;
+import org.codelibs.saml4j.ReplayCache;
+import org.codelibs.saml4j.SamlConfig;
+import org.codelibs.saml4j.SamlConfigException;
+import org.codelibs.saml4j.ServiceProvider;
 import org.dbflute.optional.OptionalEntity;
 import org.dbflute.optional.OptionalThing;
 import org.lastaflute.core.message.UserMessages;
@@ -68,19 +63,16 @@ import org.lastaflute.web.response.ActionResponse;
 import org.lastaflute.web.response.HtmlResponse;
 import org.lastaflute.web.response.StreamResponse;
 import org.lastaflute.web.util.LaRequestUtil;
-import org.lastaflute.web.util.LaResponseUtil;
-import org.w3c.dom.Document;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 
 /**
  * Authenticator for SAML 2.0.
  *
  * <p>This authenticator enables Single Sign-On (SSO) using SAML 2.0 protocol
- * with Identity Providers such as Okta, Azure AD, OneLogin, etc.</p>
+ * with Identity Providers such as Okta, Entra ID, Keycloak, OneLogin, etc.</p>
  *
  * <h2>Required Configuration</h2>
  * <p>Add the following properties to {@code system.properties}:</p>
@@ -92,43 +84,14 @@ import jakarta.servlet.http.HttpSession;
  * saml.idp.entityid=http://www.okta.com/xxxxx
  * saml.idp.single_sign_on_service.url=https://your-domain.okta.com/app/xxxxx/sso/saml
  * saml.idp.x509cert=MIIDqjCCApKgAwIBAgIGAYMwfYAwMA0G...
- * </pre>
  *
- * <h2>Service Provider URL Configuration</h2>
- * <p>By default, the SP URLs use {@code http://localhost:8080} as the base URL.
- * For production or when the IdP is configured with a different URL, you should
- * set one of the following:</p>
- *
- * <h3>Option 1: Set base URL (recommended for simplicity)</h3>
- * <pre>
- * # All SP URLs will be derived from this base URL
+ * # SP base URL; the entity ID, the assertion consumer service and the single logout service are derived from it
  * saml.sp.base.url=https://your-fess-server.example.com
  * </pre>
  *
- * <h3>Option 2: Set individual SP URLs</h3>
- * <pre>
- * # SP Entity ID (Audience URI in IdP)
- * saml.sp.entityid=https://your-fess-server.example.com/sso/metadata
- *
- * # Assertion Consumer Service URL
- * saml.sp.assertion_consumer_service.url=https://your-fess-server.example.com/sso/
- *
- * # Single Logout Service URL
- * saml.sp.single_logout_service.url=https://your-fess-server.example.com/sso/logout
- * </pre>
- *
- * <h2>Complete Configuration Example (Okta)</h2>
- * <pre>
- * sso.type=saml
- *
- * # IdP settings from Okta SAML setup instructions
- * saml.idp.entityid=http://www.okta.com/your-app-id
- * saml.idp.single_sign_on_service.url=https://your-domain.okta.com/app/your-app/your-app-id/sso/saml
- * saml.idp.x509cert=MIIDqjCCApKg... (your IdP certificate)
- *
- * # SP base URL (must match Audience URI configured in Okta)
- * saml.sp.base.url=https://your-fess-server.example.com
- * </pre>
+ * <p>{@code saml.sp.entityid}, {@code saml.sp.assertion_consumer_service.url} and
+ * {@code saml.sp.single_logout_service.url} set the individual URLs when they differ. The URLs the IdP
+ * is registered with are the ones the responses are checked against.</p>
  *
  * <h2>Optional Configuration</h2>
  * <pre>
@@ -139,35 +102,14 @@ import jakarta.servlet.http.HttpSession;
  * # Default groups/roles for authenticated users
  * saml.default.groups=user
  * saml.default.roles=user
- * </pre>
- * <p>An assertion that carries the same attribute name on more than one element is refused, and
- * the login fails before any of the mapping above is reached. An IdP that emits one
- * {@code <Attribute>} element per value produces such an assertion -- Keycloak does unless the
- * {@code single} option of its role and group mappers is enabled -- and the repeats are accepted
- * and merged only with:</p>
- * <pre>
- * saml.security.allow_duplicated_attribute_name=true
+ *
+ * # Single logout: the IdP URL (the SP URL is derived from saml.sp.base.url)
+ * saml.idp.single_logout_service.url=https://your-domain.okta.com/app/xxxxx/slo/saml
  * </pre>
  *
- * <h2>Security Settings (Production)</h2>
- * <p>For production environments, consider enabling these security features:</p>
- * <pre>
- * saml.security.authnrequest_signed=true
- * saml.security.want_messages_signed=true
- * saml.security.want_assertions_signed=true
- * </pre>
- * <p>{@code saml.security.want_messages_signed} matters in particular once
- * {@code saml.idp.single_logout_service.url} is configured. It defaults to {@code false} because
- * not every IdP signs its LogoutRequest, but while it is {@code false} the single logout service
- * accepts a LogoutRequest that nobody authenticated, and reaching it needs no knowledge of the
- * deployment: {@code Issuer} is optional in the SAML protocol schema and java-saml compares it
- * only when the element is present, so a LogoutRequest that omits it is never matched against the
- * IdP entity ID. A session logged in through SAML is protected by
- * {@link #isLogoutRequestForAnotherUser}, which refuses to end a session the LogoutRequest does
- * not name; what remains exposed is a session whose NameID the sender already knows, and any
- * session that did not come from SAML at all, because there is then no NameID to compare. The
- * impact is a forced logout, not account takeover. This is reported once as
- * {@code unsigned_logoutrequest_accepted} in the insecure-settings warning.</p>
+ * <p>The keys that {@code saml4j} reads are listed in its {@code SamlConfig}. A key it does not know is
+ * refused, so that a mistyped security setting cannot go unnoticed. Logout messages from the IdP must be signed
+ * ({@code saml.security.want_logout_signed=true}, the default) and the IdP certificate is the only trust anchor.</p>
  *
  * <h2>Session Cookie Settings (Required)</h2>
  * <p>The IdP returns the assertion as a cross-site POST to the assertion consumer service.
@@ -202,14 +144,9 @@ public class SamlAuthenticator implements SsoAuthenticator {
      *
      * <p>The value is a {@code Map<String, Long>} of AuthnRequest ID to the time it was created,
      * not a single ID: a browser with several tabs open sends one AuthnRequest per tab, and a
-     * single slot means the second overwrites the first, after which the first assertion to come
-     * back consumes the slot, fails the InResponseTo comparison and takes both logins down with
-     * it. {@code FessSearchAction} redirects every unauthenticated page hit to {@code /sso/}, so
-     * that happens as soon as a session expires with more than one tab open.</p>
-     *
-     * <p>The key is unchanged from the release that stored a bare {@link String} here, so that an
-     * existing session keeps working across an upgrade; see {@link #getRequestIdMap(HttpSession)}
-     * for how such a value is migrated.</p>
+     * single slot means the second overwrites the first. The key is unchanged from the release
+     * that stored a bare {@link String} here, so that an existing session keeps working across an
+     * upgrade; see {@link #getRequestIdMap(HttpSession)} for how such a value is migrated.</p>
      */
     protected static final String SAML_STATE = "SAML_STATE";
 
@@ -226,12 +163,7 @@ public class SamlAuthenticator implements SsoAuthenticator {
     /** Upper bound on the length of a sender-supplied NameID embedded in a log message. */
     protected static final int MAX_LOGGED_NAME_ID_LENGTH = 64;
 
-    /**
-     * Upper bound on the length of a rejection reason embedded in a log message. Longer than a
-     * NameID because the reason is a sentence that quotes what it objected to -- an entity ID, a
-     * destination, an audience -- and truncating it to a NameID's length would cut off the part
-     * that identifies the problem.
-     */
+    /** Upper bound on the length of a rejection reason embedded in a log message. */
     protected static final int MAX_LOGGED_FAILURE_REASON_LENGTH = 512;
 
     /**
@@ -242,6 +174,46 @@ public class SamlAuthenticator implements SsoAuthenticator {
     private static final Pattern LOG_UNSAFE_PATTERN = Pattern.compile("[\\p{Cntrl}\\u0085\\u2028\\u2029]");
 
     /**
+     * The properties under {@code saml.} that this authenticator reads itself; they are not passed to the library.
+     */
+    private static final Set<String> PLUGIN_KEYS =
+            Set.of("sp.base.url", "request.id.ttl", "attribute.group.name", "attribute.role.name", "default.groups", "default.roles");
+
+    /**
+     * The {@code saml.} properties that earlier releases read and that no longer mean anything, with what to use
+     * instead. They are dropped with one warning rather than refused, so that an upgrade does not stop every login
+     * over a key that was only ever a permission. Anything else that is not known is refused when the settings are
+     * built.
+     */
+    private static final Map<String, String> RETIRED_KEYS = retiredKeys();
+
+    private static Map<String, String> retiredKeys() {
+        final Map<String, String> keys = new java.util.TreeMap<>();
+        for (final String key : new String[] { "compress.request", "compress.response", "contacts.support.email_address",
+                "contacts.support.given_name", "contacts.technical.email_address", "contacts.technical.given_name",
+                "idp.single_logout_service.binding", "idp.single_logout_service.response.url", "idp.single_sign_on_service.binding",
+                "keystore.alias", "keystore.key.password", "keystore.store", "organization.displayname", "organization.lang",
+                "organization.name", "organization.url", "parsing.trim_attribute_values", "parsing.trim_name_ids",
+                "security.digest_algorithm", "security.logoutrequest_signed", "security.logoutresponse_signed", "security.nameid_encrypted",
+                "security.nameid_encryption_algorithm", "security.reject_unsolicited_responses_with_inresponseto", "security.sign_metadata",
+                "security.want_nameid", "security.want_nameid_encrypted", "security.want_xml_validation",
+                "sp.assertion_consumer_service.binding", "sp.contact", "sp.single_logout_service.binding", "sp.x509certNew",
+                "unique_id_prefix" }) {
+            keys.put(key, "it is no longer used");
+        }
+        keys.put("idp.certfingerprint", "use saml.idp.x509cert; a fingerprint is no longer a trust anchor");
+        keys.put("idp.certfingerprint_algorithm", "use saml.idp.x509cert; a fingerprint is no longer a trust anchor");
+        keys.put("security.allow_duplicated_attribute_name", "repeated attributes are always merged");
+        keys.put("security.allowed_key_transport_algorithms",
+                "only OAEP is accepted; saml.security.allow_rsa_1_5=true accepts RSA 1.5 as well");
+        keys.put("security.reject_deprecated_alg", "SHA-1 is rejected by default; saml.security.allow_deprecated_alg=true accepts it");
+        keys.put("security.reject_missing_audience", "an assertion with no audience is always rejected");
+        return java.util.Collections.unmodifiableMap(keys);
+    }
+
+    private final AtomicReference<Set<String>> loggedRetiredKeys = new AtomicReference<>();
+
+    /**
      * The property key for how long, in seconds, an unanswered AuthnRequest ID stays usable. Only
      * a positive value is honoured; see {@link #getRequestIdTtl()}.
      */
@@ -249,17 +221,14 @@ public class SamlAuthenticator implements SsoAuthenticator {
 
     /**
      * The time-to-live applied to an unanswered AuthnRequest ID when
-     * {@link #SAML_REQUEST_ID_TTL} is absent, blank, not a number, or not positive. One hour, the
-     * same default {@code EntraIdAuthenticator} uses for an OpenID Connect state, and comfortably
-     * longer than any interactive login at an IdP.
+     * {@link #SAML_REQUEST_ID_TTL} is absent, blank, not a number, or not positive. One hour.
      */
     protected static final String DEFAULT_REQUEST_ID_TTL = "3600";
 
     /**
      * The number of unanswered AuthnRequest IDs kept per session when {@code fess_sso++.xml}
      * leaves the cap alone, and the value {@link #setMaxRequestIds} falls back to when the
-     * configured one is not positive. Ten abandoned logins in one session is already well past
-     * anything a person does by hand.
+     * configured one is not positive.
      */
     protected static final int DEFAULT_MAX_REQUEST_IDS = 10;
 
@@ -267,25 +236,24 @@ public class SamlAuthenticator implements SsoAuthenticator {
      * Maximum number of unanswered AuthnRequest IDs kept per session. Every visit to
      * {@code /sso/} without a SAML response stores one, and {@code /sso/} is anonymous and
      * answers GET, so without a cap a page that embeds it as a sub-resource would grow the
-     * session attribute without bound. It also bounds the number of candidates
-     * {@link #processSamlResponse} tries.
+     * session attribute without bound.
      *
      * <p>Always positive when it is set through {@link #setMaxRequestIds}, which is the only path
      * a configured value takes; a subclass that assigns the field directly is on its own.</p>
      */
     protected int maxRequestIds = DEFAULT_MAX_REQUEST_IDS;
 
-    private Map<String, Object> defaultSettings;
+    private Map<String, String> defaultSettings;
 
     /**
      * Cache of processed assertion IDs, used to reject replayed assertions.
      *
-     * <p><b>Note:</b> the cache is held in memory by this instance and is not shared in a
-     * multi-instance deployment. Without the session store of Fess (sticky sessions) the
-     * assertion has to reach the instance whose session holds the matching AuthnRequest ID.
-     * With it ({@code FESS_SESSION_STORE=opensearch}) any instance can answer, because the
-     * pending IDs are shared. It is that ID check, not this cache, which rejects an assertion
-     * replayed to another instance; the cache catches a repeated POST within a single session.</p>
+     * <p>The cache is held in memory by this instance and is not shared in a multi-instance
+     * deployment. Without the session store of Fess (sticky sessions) the assertion has to reach
+     * the instance whose session holds the matching AuthnRequest ID. With it
+     * ({@code FESS_SESSION_STORE=opensearch}) any instance can answer, because the pending IDs are
+     * shared. It is that ID check, not this cache, which rejects an assertion replayed to another
+     * instance; the cache catches a repeated POST within a single session.</p>
      */
     private final ReplayCache replayCache = new InMemoryReplayCache();
 
@@ -296,27 +264,15 @@ public class SamlAuthenticator implements SsoAuthenticator {
     private final AtomicReference<List<String>> loggedSecurityWarnings = new AtomicReference<>();
 
     /**
-     * The most recently built settings, paired with the parameters they were built from.
+     * The most recently built service provider, paired with the properties it was built from.
      *
-     * @param params the parameters the settings were built from; values are always {@link String},
-     *               never a {@link java.net.URL}, whose {@code equals} would resolve DNS
-     * @param settings the settings built from {@code params}
+     * @param props the properties the service provider was built from
+     * @param provider the service provider built from {@code props}
      */
-    private record CachedSettings(Map<String, Object> params, Saml2Settings settings) {
+    private record CachedProvider(Map<String, String> props, ServiceProvider provider) {
     }
 
-    /**
-     * The settings built for the parameters currently in effect.
-     *
-     * <p>Building is not cheap and is not silent: it re-parses the IdP certificate and the SP
-     * private key, and {@code SettingsBuilder.build()} logs one line per security warning, so a
-     * per-request build defeats the deduplication in {@link #logSecurityWarnings(Saml2Settings)}.</p>
-     *
-     * <p>An {@link AtomicReference} rather than a plain field because it is required for safe
-     * publication: every field of {@link Saml2Settings} is non-final and non-volatile, so another
-     * thread could otherwise observe a partially initialized instance.</p>
-     */
-    private final AtomicReference<CachedSettings> cachedSettings = new AtomicReference<>();
+    private final AtomicReference<CachedProvider> cachedProvider = new AtomicReference<>();
 
     /**
      * Initializes the SamlAuthenticator.
@@ -336,13 +292,8 @@ public class SamlAuthenticator implements SsoAuthenticator {
      * {@code FESS_SESSION_STORE=opensearch} is set, how to write the user of a SAML login.
      *
      * <p>It has to run while the container initializes, before the store fixes the classes it knows, and it
-     * is harmless when the store is not selected: the serializer only remembers the registration. Without
-     * it the {@link SamlUser} of a session is not shared and the login holds on the node that handled it only.
-     * A failure is logged and never stops the authenticator from starting.</p>
-     *
-     * <p>Not registered, on purpose: {@link SamlCredential}, which holds the attributes of the assertion and
-     * is never kept in the session, and the pending AuthnRequest IDs ({@link #SAML_STATE}), a
-     * {@link ConcurrentHashMap} of strings and numbers that Fess can already write.</p>
+     * is harmless when the store is not selected. A failure is logged and never stops the authenticator from
+     * starting.</p>
      */
     protected void registerSessionSerializers() {
         try {
@@ -359,52 +310,19 @@ public class SamlAuthenticator implements SsoAuthenticator {
     /**
      * Creates the settings that are applied before the {@code saml.} system properties.
      *
-     * <p>NOTE: Many security settings are set to false for compatibility.
-     * For production use, it is STRONGLY RECOMMENDED to enable security features:
-     * {@code saml.security.authnrequest_signed}, {@code saml.security.want_messages_signed}
-     * and {@code saml.security.want_assertions_signed}.</p>
-     *
-     * <p>The SP endpoint URLs are not included here because they are derived from
-     * {@code saml.sp.base.url}, which can be changed at runtime. They are built by
-     * {@link #buildSettingsParams()}.</p>
-     *
-     * @return The default settings.
+     * @return The default settings, keyed without the {@code saml.} prefix.
      */
-    protected Map<String, Object> createDefaultSettings() {
-        final Map<String, Object> settings = new HashMap<>();
-        settings.put("onelogin.saml2.strict", "true");
-        settings.put("onelogin.saml2.debug", "false");
-        settings.put("onelogin.saml2.sp.assertion_consumer_service.binding", "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST");
-        settings.put("onelogin.saml2.sp.single_logout_service.binding", "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect");
-        settings.put("onelogin.saml2.sp.nameidformat", "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress");
-        settings.put("onelogin.saml2.idp.single_sign_on_service.binding", "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect");
-        settings.put("onelogin.saml2.idp.single_logout_service.binding", "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect");
-        settings.put("onelogin.saml2.security.nameid_encrypted", "false");
-        settings.put("onelogin.saml2.security.authnrequest_signed", "false");
-        settings.put("onelogin.saml2.security.logoutrequest_signed", "false");
-        settings.put("onelogin.saml2.security.logoutresponse_signed", "false");
-        settings.put("onelogin.saml2.security.want_messages_signed", "false");
-        settings.put("onelogin.saml2.security.want_assertions_signed", "false");
-        settings.put("onelogin.saml2.security.want_assertions_encrypted", "false");
-        settings.put("onelogin.saml2.security.want_nameid_encrypted", "false");
-        settings.put("onelogin.saml2.security.requested_authncontext", "urn:oasis:names:tc:SAML:2.0:ac:classes:Password");
-        settings.put("onelogin.saml2.security.requested_authncontextcomparison", "exact");
-        settings.put("onelogin.saml2.security.want_xml_validation", "true");
-        settings.put("onelogin.saml2.security.signature_algorithm", "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256");
-        settings.put("onelogin.saml2.organization.name", "CodeLibs");
-        settings.put("onelogin.saml2.organization.displayname", "Fess");
-        settings.put("onelogin.saml2.organization.url", "https://fess.codelibs.org/");
-        settings.put("onelogin.saml2.contacts.technical.given_name", "Technical Guy");
-        settings.put("onelogin.saml2.contacts.technical.email_address", "technical@example.com");
-        settings.put("onelogin.saml2.contacts.support.given_name", "Support Guy");
-        settings.put("onelogin.saml2.contacts.support.email_address", "support@example.com");
+    protected Map<String, String> createDefaultSettings() {
+        final Map<String, String> settings = new HashMap<>();
+        settings.put("sp.nameidformat", "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress");
+        settings.put("security.requested_authncontext", "urn:oasis:names:tc:SAML:2.0:ac:classes:Password");
+        settings.put("security.requested_authncontextcomparison", "exact");
         return settings;
     }
 
     /**
      * Builds a default URL for SAML endpoints.
-     * Uses the configured base URL or defaults to http://localhost:8080 for compatibility
-     * with common SAML IdP configurations.
+     * Uses the configured base URL or defaults to http://localhost:8080.
      *
      * @param path the path to append to the base URL
      * @return the complete URL
@@ -422,117 +340,103 @@ public class SamlAuthenticator implements SsoAuthenticator {
     }
 
     /**
-     * Builds the parameters the SAML settings are built from.
+     * Builds the properties the configuration is read from, keyed without the {@code saml.} prefix.
      *
-     * <p>The {@code saml.} system properties are applied without filtering out blank values:
-     * {@code SettingsBuilder} already treats a blank value as absent, so a present-but-blank
-     * property falls through to the library default. That is what lets
-     * {@code saml.security.requested_authncontext=} suppress the {@code RequestedAuthnContext}
-     * element, which is the documented way of not constraining the authentication method.</p>
+     * <p>A present-but-blank property is passed on as it is and counts as absent, which is what lets
+     * {@code saml.security.requested_authncontext=} suppress the requested authentication context. The
+     * three SP URLs are computed from {@code saml.sp.base.url} when they are not set, and the SP single
+     * logout URL only when the IdP one is.</p>
      *
-     * <p>The three SP endpoint URLs are the exception: they are computed from
-     * {@code saml.sp.base.url} rather than defaulted by the library, so they are filled in only
-     * when the matching property is absent or blank.</p>
-     *
-     * <p>Every value in the returned map is a {@link String}. A {@link java.net.URL} must never be
-     * put in it, because the map is compared with {@code equals} and {@code URL.equals} resolves
-     * DNS.</p>
-     *
-     * @return The parameters for {@link SettingsBuilder}.
+     * @return The properties for {@link SamlConfig#fromMap(Map)}.
      */
-    protected Map<String, Object> buildSettingsParams() {
-        final Map<String, Object> params = new HashMap<>(defaultSettings);
+    protected Map<String, String> buildProperties() {
+        return buildProperties(false);
+    }
+
+    /**
+     * Builds the properties the configuration is read from.
+     *
+     * @param forMetadata true to build them for the SP metadata, which always names the single logout service
+     * @return The properties.
+     * @see #buildProperties()
+     */
+    protected Map<String, String> buildProperties(final boolean forMetadata) {
+        final Map<String, String> params = new HashMap<>(defaultSettings);
+        final Set<String> retired = new java.util.TreeSet<>();
         final DynamicProperties systemProperties = ComponentUtil.getSystemProperties();
-        systemProperties.entrySet().stream().forEach(e -> {
+        systemProperties.entrySet().forEach(e -> {
             final String key = e.getKey().toString();
             if (!key.startsWith(SAML_PREFIX)) {
                 return;
             }
-            params.put("onelogin.saml2." + key.substring(SAML_PREFIX.length()), e.getValue());
+            final String name = key.substring(SAML_PREFIX.length());
+            if (RETIRED_KEYS.containsKey(name)) {
+                retired.add(name);
+            } else if (!PLUGIN_KEYS.contains(name)) {
+                params.put(name, e.getValue() == null ? "" : e.getValue().toString());
+            }
         });
-        // resolved here, not in createDefaultSettings(), because saml.sp.base.url can be changed
-        // at runtime from the admin UI
-        putComputedSpUrl(params, "onelogin.saml2.sp.entityid", "/sso/metadata");
-        putComputedSpUrl(params, "onelogin.saml2.sp.assertion_consumer_service.url", "/sso/");
-        putComputedSpUrl(params, "onelogin.saml2.sp.single_logout_service.url", "/sso/logout");
+        logRetiredKeys(retired);
+        fillUrl(params, "sp.entityid", "/sso/metadata");
+        fillUrl(params, "sp.assertion_consumer_service.url", "/sso/");
+        if (forMetadata) {
+            fillUrl(params, "sp.single_logout_service.url", "/sso/logout");
+        } else if (StringUtil.isBlank(params.get("idp.single_logout_service.url"))) {
+            params.remove("sp.single_logout_service.url");
+        } else {
+            fillUrl(params, "sp.single_logout_service.url", "/sso/logout");
+        }
         return params;
     }
 
-    /**
-     * Derives an SP endpoint URL from {@code saml.sp.base.url} unless the corresponding property
-     * already carries a usable value.
-     *
-     * <p>A present-but-blank property must not wipe out the derived URL: the library would treat
-     * it as absent and leave the SP endpoint unset, which fails {@code checkSPSettings()}.</p>
-     *
-     * @param params The parameters being built.
-     * @param key The {@code onelogin.saml2.} key to fill in.
-     * @param path The path to append to the base URL.
-     */
-    protected void putComputedSpUrl(final Map<String, Object> params, final String key, final String path) {
-        if (params.get(key) instanceof final String s && StringUtil.isNotBlank(s)) {
+    private void logRetiredKeys(final Set<String> retired) {
+        if (retired.isEmpty() || retired.equals(loggedRetiredKeys.getAndSet(retired))) {
             return;
         }
-        params.put(key, buildDefaultUrl(path));
+        final String list = retired.stream().map(k -> SAML_PREFIX + k + " (" + RETIRED_KEYS.get(k) + ")").collect(Collectors.joining(", "));
+        logger.warn("These SAML properties are no longer used and are ignored: {}", list);
+    }
+
+    private void fillUrl(final Map<String, String> params, final String key, final String path) {
+        if (StringUtil.isBlank(params.get(key))) {
+            params.put(key, buildDefaultUrl(path));
+        }
     }
 
     /**
-     * Gets the SAML settings.
+     * Gets the service provider for the properties currently in effect. It is rebuilt only when they change.
      *
-     * <p>The settings are cached and rebuilt only when the parameters change, because building
-     * them re-parses the IdP certificate and the SP private key and logs the security warnings
-     * again.</p>
-     *
-     * @return The SAML settings.
+     * @return The service provider.
+     * @throws SamlConfigException if the properties do not make a valid configuration.
      */
-    protected Saml2Settings getSettings() {
-        final Map<String, Object> params = buildSettingsParams();
-        final CachedSettings cached = cachedSettings.get();
-        if (cached != null && cached.params().equals(params)) {
-            return cached.settings();
+    protected ServiceProvider getServiceProvider() {
+        final Map<String, String> params = buildProperties();
+        final CachedProvider cached = cachedProvider.get();
+        if (cached != null && cached.props().equals(params)) {
+            return cached.provider();
         }
-        // deliberately get()/set() rather than updateAndGet() or a synchronized block: the
-        // mapping function of updateAndGet() may be retried, and building has logging side
-        // effects that must not be repeated. Two threads building at once is harmless; both
-        // produce equivalent settings and the last write wins.
-        final Saml2Settings settings = new SettingsBuilder().fromValues(params).build();
-        settings.setReplayCache(replayCache);
-        logSecurityWarnings(settings);
-        cachedSettings.set(new CachedSettings(params, settings));
-        return settings;
+        final SamlConfig config = SamlConfig.fromMap(params);
+        final ServiceProvider provider = ServiceProvider.create(config, replayCache);
+        logSecurityWarnings(config);
+        cachedProvider.set(new CachedProvider(params, provider));
+        return provider;
     }
 
     /**
-     * Logs the security warnings reported for the given settings.
-     * The warnings are logged again only when they change, so that a settings rebuild does not
-     * repeat them.
+     * Logs the settings that weaken the defaults. The warnings are logged again only when they change.
      *
-     * @param settings The SAML settings.
+     * @param config The configuration.
      */
-    protected void logSecurityWarnings(final Saml2Settings settings) {
-        final List<String> warnings = new ArrayList<>(settings.getSecurityWarnings());
-        if (settings.getIdpSingleLogoutServiceResponseUrl() != null && !settings.getWantMessagesSigned()) {
-            // /sso/logout accepts a LogoutRequest that is not signed, so anyone who can lure a
-            // logged-in user to a crafted URL can reach it; not even the IdP entity ID is needed,
-            // since Issuer is optional in the protocol schema and java-saml compares it only when
-            // it is present. isLogoutRequestForAnotherUser() keeps such a request from ending a
-            // SAML session it does not name, but a session whose NameID the sender already knows,
-            // and a session that did not come from SAML and therefore has no NameID to compare,
-            // are still ended by it.
-            warnings.add("unsigned_logoutrequest_accepted");
+    protected void logSecurityWarnings(final SamlConfig config) {
+        final List<String> warnings = new java.util.ArrayList<>();
+        if (config.singleLogoutServiceUrl() != null && !config.wantLogoutSigned()) {
+            warnings.add("unsigned_logout_accepted");
         }
-        final Set<String> allowedKeyTransport = settings.getAllowedKeyTransportAlgorithms();
-        if (settings.getSPkey() != null && (allowedKeyTransport == null || allowedKeyTransport.isEmpty())) {
-            // With an SP private key configured, /sso/ decrypts an EncryptedAssertion before it
-            // validates anything: SamlResponse decrypts in its constructor, and processResponse()
-            // only calls isValid() afterwards. The endpoint is anonymous, and an AuthnRequest ID
-            // to quote back is one GET /sso/ away, so an unauthenticated caller can drive the SP
-            // private key through RSA decryption with a ciphertext of their choosing.
-            // java-saml accepts every key transport algorithm when the allow-list is unset, which
-            // includes the RSA-1_5 padding that Bleichenbacher-style attacks target. Fess does not
-            // set it, so say so rather than changing a default that would break an IdP relying on
-            // the old algorithm.
-            warnings.add("key_transport_algorithms_not_restricted");
+        if (config.allowDeprecatedAlg()) {
+            warnings.add("deprecated_signature_algorithms_accepted");
+        }
+        if (config.allowRsa15()) {
+            warnings.add("rsa_1_5_key_transport_accepted");
         }
         if (!warnings.equals(loggedSecurityWarnings.getAndSet(warnings)) && !warnings.isEmpty()) {
             logger.warn("Insecure SAML settings: {}. See the SAML SSO documentation for the recommended values.",
@@ -547,8 +451,6 @@ public class SamlAuthenticator implements SsoAuthenticator {
                 logger.debug("Logging in with SAML Authenticator");
             }
 
-            final HttpServletResponse response = LaResponseUtil.getResponse();
-
             if (containsSamlResponse(request)) {
                 final HttpSession session = request.getSession(false);
                 // counted here rather than inside removeExpiredRequestIds so that the pruning
@@ -560,7 +462,7 @@ public class SamlAuthenticator implements SsoAuthenticator {
                     removeExpiredRequestIds(requestIdMap);
                     if (!requestIdMap.isEmpty()) {
                         try {
-                            final LoginCredential credential = processSamlResponse(request, response, requestIdMap);
+                            final LoginCredential credential = processSamlResponse(request, requestIdMap);
                             if (credential != null) {
                                 // The ID is consumed. With a shared session store another request of this
                                 // session may have replaced the attribute by a newer copy meanwhile, and
@@ -569,21 +471,9 @@ public class SamlAuthenticator implements SsoAuthenticator {
                                 session.setAttribute(SAML_STATE, requestIdMap);
                             }
                             return credential;
-                        } catch (final SAMLException e) {
-                            // The assertion consumer service is anonymous, and a SAMLResponse that
-                            // cannot be decoded or parsed is refused before the pending
-                            // AuthnRequest ID is consumed (see processSamlResponse), so the same
-                            // request can be repeated for the whole TTL. A stack trace per attempt
-                            // would let an unauthenticated client fill the log; SsoAction already
-                            // makes this split for SsoStateException.
-                            if (isDuplicatedAttributeName(e)) {
-                                logDuplicatedAttributeName();
-                            } else {
-                                logger.warn("Authentication failed: {}", describeSamlFailure(e));
-                            }
-                            if (logger.isDebugEnabled()) {
-                                logger.debug("Authentication failed.", e);
-                            }
+                        } catch (final SamlConfigException e) {
+                            logger.warn("Authentication failed: invalid SAML settings: {}",
+                                    sanitizeForLog(e.getMessage(), MAX_LOGGED_FAILURE_REASON_LENGTH));
                             return null;
                         } catch (final Exception e) {
                             logger.warn("Authentication failed.", e);
@@ -591,10 +481,7 @@ public class SamlAuthenticator implements SsoAuthenticator {
                         }
                     }
                     // pruning is the only thing this thread removed, so an emptied map that was not
-                    // empty a moment ago says how many logins ran out of time. A concurrent request
-                    // of the same session can consume or evict an entry too, which would make this
-                    // an over-count; it only shapes a log line, and the response was unanswerable
-                    // by this thread either way.
+                    // empty a moment ago says how many logins ran out of time.
                     expiredCount = pendingCount;
                 }
                 // No session at all, or one that holds nothing still answerable: the assertion
@@ -611,16 +498,14 @@ public class SamlAuthenticator implements SsoAuthenticator {
             }
 
             try {
-                final Auth auth = new Auth(getSettings(), request, response);
-                final AuthnRequestParams authnRequestParams = new AuthnRequestParams(false, false, true);
-                final String loginUrl = auth.login(null, authnRequestParams, true);
-                storeRequestIdInSession(request.getSession(), auth.getLastRequestId());
-                return new ActionResponseCredential(() -> HtmlResponse.fromRedirectPathAsIs(loginUrl));
-            } catch (final SettingsException e) {
+                final LoginStart start = getServiceProvider().startLogin();
+                storeRequestIdInSession(request.getSession(), start.requestId());
+                return new ActionResponseCredential(() -> HtmlResponse.fromRedirectPathAsIs(start.redirectUrl()));
+            } catch (final SamlConfigException e) {
                 // An SsoStateException: any anonymous request to /sso/ reaches this on a server whose IdP
-                // settings are not complete, and SsoAction logs anything else with a stack trace. It does
-                // not log the cause, so the settings that java-saml names go into the message.
-                throw new SsoStateException("Failed to start a SAML login: " + describeSamlFailure(e), e);
+                // settings are not complete, and SsoAction logs anything else with a stack trace.
+                throw new SsoStateException(
+                        "Failed to start a SAML login: " + sanitizeForLog(e.getMessage(), MAX_LOGGED_FAILURE_REASON_LENGTH), e);
             } catch (final Exception e) {
                 throw new SsoLoginException("Invalid SAML redirect URL.", e);
             }
@@ -629,140 +514,44 @@ public class SamlAuthenticator implements SsoAuthenticator {
     }
 
     /**
-     * Renders a SAML failure as the single line that stands in for its stack trace at WARN.
-     *
-     * <p>The cause chain is rendered, not just {@code getMessage()}, because the exception a
-     * malformed response produces is often the one that says the least: java-saml wraps a parse
-     * failure as {@code XMLParsingException("Failed to load XML data.", cause)}, whose own
-     * message names neither what failed nor where. Everything actionable lives further down the
-     * chain, so dropping it would trade a noisy log for a useless one.</p>
-     *
-     * <p>Split out as its own method so that an extension can reshape or shorten this line
-     * without having to re-implement the WARN/DEBUG split around it. The full stack trace stays
-     * available at DEBUG either way.</p>
-     *
-     * @param throwable The failure to describe.
-     * @return The chain rendered as {@code Type: message} entries joined by {@code " <- "},
-     *         stopping at the first cause already seen so that a cyclic chain terminates.
-     */
-    protected String describeSamlFailure(final Throwable throwable) {
-        final Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
-        final StringBuilder buf = new StringBuilder();
-        for (Throwable current = throwable; current != null && seen.add(current); current = current.getCause()) {
-            if (buf.length() > 0) {
-                buf.append(" <- ");
-            }
-            buf.append(current.getClass().getSimpleName());
-            if (StringUtil.isNotBlank(current.getMessage())) {
-                buf.append(": ").append(current.getMessage());
-            }
-        }
-        return buf.toString();
-    }
-
-    /**
      * Answers a SAML response with the pending AuthnRequest it names.
      *
-     * <p>{@code Auth.processResponse} takes exactly one AuthnRequest ID and compares it with the
-     * InResponseTo of the response, and java-saml 3.1.1 exposes no supported way of reading that
-     * InResponseTo beforehand: {@code SamlResponse} has no getter for it, and the only other
-     * route would be to base64-decode and parse the {@code SAMLResponse} parameter here, which
-     * would add an XML parsing surface -- and therefore an XXE surface -- to an endpoint that is
-     * anonymous by design. So the candidates are tried one at a time instead.</p>
-     *
-     * <p>That is cheap and, more importantly, safe, because of where the comparison sits in
-     * {@code SamlResponse.isValid}: it runs before signature validation and before the assertion
-     * ID is registered with the replay cache, so a candidate the response does not name fails
-     * fast and leaves no trace behind. A candidate that fails for any other reason has already
-     * passed the comparison, so there is nothing left to try and the loop stops there; that is
-     * also what keeps the reported error the real one rather than the InResponseTo mismatch of
-     * whichever candidate happened to be tried last.</p>
-     *
-     * <p>Only a response that authenticates consumes its AuthnRequest ID. Consuming it on failure
-     * as well would look tidier, but telling "named this ID and was then rejected" apart from
-     * "was rejected before the ID was even looked at" means enumerating java-saml's internal
-     * ordering of checks, and getting that wrong hands anyone who can reach the assertion
-     * consumer service -- a cross-site POST, since SAML requires {@code SameSite=none} -- a way
-     * to burn a pending login per request. The TTL and {@link #maxRequestIds} bound the map
-     * instead.</p>
-     *
-     * <p>With {@code saml.strict=false} the library skips the InResponseTo comparison entirely,
-     * so the first candidate either authenticates or fails for a real reason and no further
-     * candidate is tried. That matches the library's contract: without strict mode there is no
-     * InResponseTo binding to match against.</p>
+     * <p>All pending IDs are handed to the library at once. It parses the response a single time and the
+     * response has to answer one of them; the one it answered is consumed.</p>
      *
      * @param request The HTTP request carrying the SAML response.
-     * @param response The HTTP response.
      * @param requestIdMap The pending AuthnRequest IDs of the session, already pruned of expired
      *            entries. The matching entry is removed from it on success.
      * @return The login credential, or null when the response is not accepted.
      */
-    protected LoginCredential processSamlResponse(final HttpServletRequest request, final HttpServletResponse response,
-            final Map<String, Long> requestIdMap) {
-        Auth lastAuth = null;
-        for (final String requestId : getCandidateRequestIds(requestIdMap)) {
-            final Auth auth = createAuth(request, response);
-            auth.processResponse(requestId);
-            if (auth.isAuthenticated()) {
-                requestIdMap.remove(requestId);
-                return createLoginCredential(request, response, auth);
-            }
-            lastAuth = auth;
-            if (!isInResponseToMismatch(auth)) {
-                break;
-            }
+    protected LoginCredential processSamlResponse(final HttpServletRequest request, final Map<String, Long> requestIdMap) {
+        final Set<String> candidates = new HashSet<>(getCandidateRequestIds(requestIdMap));
+        final LoginResult result = getServiceProvider().finishLogin(request.getParameter("SAMLResponse"), candidates);
+        if (result instanceof final LoginResult.Authenticated authenticated) {
+            requestIdMap.remove(authenticated.requestId());
+            return createLoginCredential(authenticated);
         }
-        if (lastAuth == null || isInResponseToMismatch(lastAuth)) {
+        final LoginResult.Rejected rejected = (LoginResult.Rejected) result;
+        if (rejected.reason() == Reason.WRONG_IN_RESPONSE_TO) {
             logUnmatchedSamlResponse(requestIdMap.size());
-            return null;
-        }
-        // java-saml adds the StatusCode and SubStatusCode of a non-success response to the errors
-        // exactly as the sender wrote them, and checks them before anything is authenticated.
-        final String errors = sanitizeForLog(String.join(", ", lastAuth.getErrors()), MAX_LOGGED_FAILURE_REASON_LENGTH);
-        // The reason is reported whatever saml.debug is set to. getErrors() answers a category --
-        // "invalid_response" for a bad signature, an expired assertion, a foreign audience and a
-        // replay alike -- so on its own it tells an administrator only that the login failed. The
-        // detail used to reach the log anyway because java-saml logged it at warn as well; it now
-        // leaves that to whoever calls it, and getLastErrorReason() carries it either way.
-        final String reason = lastAuth.getLastErrorReason();
-        if (StringUtil.isNotBlank(reason)) {
-            // The reason quotes the message it objected to -- an issuer, a destination, an
-            // audience -- and this endpoint is anonymous, so the quoted part is a sender's own
-            // input and is bounded and stripped of control characters like any other.
-            logger.warn("Authentication Failure: {} - Reason: {}", errors, sanitizeForLog(reason, MAX_LOGGED_FAILURE_REASON_LENGTH));
         } else {
-            logger.warn("Authentication Failure: {}", errors);
+            // Reported whatever the log level: the code alone says only that the login failed, and the detail
+            // says what was objected to. It quotes the message, so the library bounds it and strips control
+            // characters; this endpoint is anonymous.
+            logger.warn("Authentication failed: {} - {}", rejected.reason(),
+                    sanitizeForLog(rejected.detail(), MAX_LOGGED_FAILURE_REASON_LENGTH));
         }
         return null;
     }
 
     /**
-     * Creates the {@link Auth} that processes one candidate AuthnRequest ID.
+     * Returns the pending AuthnRequest IDs to offer, most recently created first.
      *
-     * <p>A fresh instance per candidate is required, not an optimisation left undone:
-     * {@code Auth} accumulates its errors, its authenticated flag and its last validation
-     * exception across calls, so reusing one would report the first candidate's InResponseTo
-     * mismatch alongside whatever the matching candidate produced.</p>
-     *
-     * @param request The HTTP request.
-     * @param response The HTTP response.
-     * @return A new SAML authentication object.
-     */
-    protected Auth createAuth(final HttpServletRequest request, final HttpServletResponse response) {
-        return new Auth(getSettings(), request, response);
-    }
-
-    /**
-     * Returns the pending AuthnRequest IDs to try, most recently created first.
-     *
-     * <p>Most recent first because the overwhelmingly common case is a single login, whose ID is
-     * the newest one; every earlier entry is a tab or a visit the user abandoned. The list is
-     * capped at {@link #maxRequestIds} even though the map is already bounded on write, so that
-     * lowering the cap at runtime takes effect on the very next response rather than only once
-     * the surplus entries have been evicted.</p>
+     * <p>The list is capped at {@link #maxRequestIds} even though the map is already bounded on write, so that
+     * lowering the cap at runtime takes effect on the very next response.</p>
      *
      * @param requestIdMap The pending AuthnRequest IDs of the session.
-     * @return The AuthnRequest IDs to try, in the order they are tried.
+     * @return The AuthnRequest IDs to offer.
      */
     protected List<String> getCandidateRequestIds(final Map<String, Long> requestIdMap) {
         return requestIdMap.entrySet()
@@ -771,19 +560,6 @@ public class SamlAuthenticator implements SsoAuthenticator {
                 .limit(maxRequestIds)
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
-    }
-
-    /**
-     * Returns whether the given attempt failed only because the response names a different
-     * AuthnRequest, which is the one failure that says nothing about the response itself and is
-     * therefore worth retrying with the next candidate.
-     *
-     * @param auth The attempt that did not authenticate.
-     * @return true if the response's InResponseTo did not match the candidate that was tried.
-     */
-    protected boolean isInResponseToMismatch(final Auth auth) {
-        return auth.getLastValidationException() instanceof final ValidationException e
-                && e.getErrorCode() == ValidationException.WRONG_INRESPONSETO;
     }
 
     /**
@@ -881,58 +657,6 @@ public class SamlAuthenticator implements SsoAuthenticator {
                  the session, and with it the AuthnRequest ID it held, was discarded by the\
                  container's session timeout rather than by {}, so raising that value does not help.\
                  Starting the login again resolves it.""", SAML_REQUEST_ID_TTL);
-    }
-
-    /**
-     * Returns whether the given failure is the library refusing an assertion that carries the same
-     * attribute name more than once.
-     *
-     * <p>Matched on {@link ValidationException#DUPLICATED_ATTRIBUTE_NAME_FOUND} rather than on the
-     * message, which is the library's to change.</p>
-     *
-     * @param e The failure that ended the login.
-     * @return True if the assertion repeated an attribute name.
-     */
-    protected boolean isDuplicatedAttributeName(final SAMLException e) {
-        return e instanceof final ValidationException ve && ve.getErrorCode() == ValidationException.DUPLICATED_ATTRIBUTE_NAME_FOUND;
-    }
-
-    /**
-     * Logs the one line reported when the IdP put the same attribute name on more than one
-     * element of the assertion.
-     *
-     * <p>Told apart from the generic failure line because the generic one -- "Found an Attribute
-     * element with duplicated Name" -- names a fact about the XML and leaves an administrator with
-     * nothing to change. The setting that accepts the repeats exists, but nothing in Fess mentions
-     * it, so without this line the deployment is a dead end.</p>
-     *
-     * <p>It is worth its own line because of how it is reached rather than how rare it is: this
-     * refusal happens in {@code Auth#processResponse} after {@code SamlResponse#isValid} has
-     * already returned true, while the attributes are being read, so the signature, the
-     * InResponseTo comparison and the replay check all passed. An administrator who is told only
-     * that an assertion was refused reasonably suspects the certificate or the clock, none of
-     * which is involved.</p>
-     *
-     * <p>Keycloak is named because it is listed as a supported IdP and produces this on a stock
-     * configuration: its role and group mappers emit one {@code <Attribute>} element per value
-     * unless their {@code single} option is enabled, and every Keycloak account carries several
-     * default realm roles, so every login of every user fails. The failure does not depend on
-     * Fess mapping those attributes -- a deployment that sets no
-     * {@code saml.attribute.role.name} at all fails identically, because the refusal is in the
-     * library, before Fess is given anything to map.</p>
-     *
-     * <p>The pending AuthnRequest ID is not consumed by this failure, so a login retried after the
-     * IdP or Fess is reconfigured still has its ID to match against.</p>
-     */
-    protected void logDuplicatedAttributeName() {
-        logger.warn("""
-                The IdP repeated an attribute name in the SAML assertion, which is refused, so the login failed\
-                 while the attributes were being read; the assertion itself passed validation and no group or\
-                 role was mapped. An IdP that emits one <Attribute> element per value produces this: Keycloak\
-                 does unless the "single" option of its role and group mappers is enabled, and every Keycloak\
-                 account carries several default roles. Either aggregate each attribute into a single element\
-                 at the IdP, or set {}=true in system.properties to accept the repeats and merge their values.""",
-                SAML_PREFIX + "security.allow_duplicated_attribute_name");
     }
 
     /**
@@ -1194,13 +918,12 @@ public class SamlAuthenticator implements SsoAuthenticator {
 
     /**
      * Creates a login credential.
-     * @param request The HTTP request.
-     * @param response The HTTP response.
-     * @param auth The SAML authentication.
+     *
+     * @param authenticated The accepted login.
      * @return The login credential.
      */
-    protected LoginCredential createLoginCredential(final HttpServletRequest request, final HttpServletResponse response, final Auth auth) {
-        final SamlCredential samlCredential = new SamlCredential(auth);
+    protected LoginCredential createLoginCredential(final LoginResult.Authenticated authenticated) {
+        final SamlCredential samlCredential = new SamlCredential(authenticated);
         if (logger.isDebugEnabled()) {
             logger.debug("SamlCredential: {}", samlCredential);
         }
@@ -1215,35 +938,29 @@ public class SamlAuthenticator implements SsoAuthenticator {
     @Override
     public String logout(final FessUserBean user) {
         if (user.getFessUser() instanceof final SamlUser samlUser) {
-            return LaRequestUtil.getOptionalRequest().map(request -> {
-                if (logger.isDebugEnabled()) {
-                    logger.debug("Logging out with SAML Authenticator");
-                }
-                final HttpServletResponse response = LaResponseUtil.getResponse();
-                try {
-                    final Saml2Settings settings = getSettings();
-                    if (settings.getIdpSingleLogoutServiceUrl() == null) {
-                        if (logger.isDebugEnabled()) {
-                            logger.debug("IdP single logout service URL is not configured, skipping SLO for user: {}", samlUser);
-                        }
-                        return null;
-                    }
-                    final Auth auth = new Auth(settings, request, response);
-                    final LogoutRequestParams logoutRequestParams = new LogoutRequestParams(samlUser.getSessionIndex(), samlUser.getName(),
-                            samlUser.getNameIdFormat(), samlUser.getNameidNameQualifier(), samlUser.getNameidSPNameQualifier());
-                    return auth.logout(null, logoutRequestParams, true);
-                } catch (final Exception e) {
-                    // Every logout of a logged-in user reaches this while the IdP settings do not build, so
-                    // the warning is one line and the stack trace stays at debug level, as for the
-                    // other failures of this authenticator. The exception texts can quote a setting.
-                    logger.warn("Failed to logout from IdP: name={} - {}", sanitizeForLog(String.valueOf(samlUser.getName())),
-                            sanitizeForLog(describeSamlFailure(e), MAX_LOGGED_FAILURE_REASON_LENGTH));
+            if (logger.isDebugEnabled()) {
+                logger.debug("Logging out with SAML Authenticator");
+            }
+            try {
+                final ServiceProvider provider = getServiceProvider();
+                if (provider.config().idpSingleLogoutServiceUrl() == null) {
                     if (logger.isDebugEnabled()) {
-                        logger.debug("Failed to logout from IdP.", e);
+                        logger.debug("IdP single logout service URL is not configured, skipping SLO for user: {}", samlUser);
                     }
+                    return null;
                 }
-                return null;
-            }).orElse(null);
+                final NameId nameId = new NameId(samlUser.getName(), samlUser.getNameIdFormat(), samlUser.getNameidNameQualifier(),
+                        samlUser.getNameidSPNameQualifier());
+                return provider.startLogout(nameId, samlUser.getSessionIndex()).redirectUrl();
+            } catch (final Exception e) {
+                // Every logout of a logged-in user reaches this while the IdP settings do not build, so
+                // the warning is one line and the stack trace stays at debug level.
+                logger.warn("Failed to logout from IdP: name={} - {}", sanitizeForLog(String.valueOf(samlUser.getName())),
+                        sanitizeForLog(String.valueOf(e.getMessage()), MAX_LOGGED_FAILURE_REASON_LENGTH));
+                if (logger.isDebugEnabled()) {
+                    logger.debug("Failed to logout from IdP.", e);
+                }
+            }
         }
         return null;
     }
@@ -1283,43 +1000,10 @@ public class SamlAuthenticator implements SsoAuthenticator {
     }
 
     /**
-     * Gets the metadata response.
+     * Builds the response that serves the service provider metadata as {@code metadata.xml}.
      *
      * <p>The SP metadata is what the IdP is registered from, so it has to be obtainable before
-     * any {@code saml.idp.*} property exists. Only the SP settings are therefore validated;
-     * constructing an {@link Auth} here would validate the IdP settings in its constructor and
-     * fail while they are still empty.</p>
-     *
-     * @return The metadata response.
-     */
-    /**
-     * Warns when metadata signing was asked for but cannot happen.
-     *
-     * <p>{@code Saml2Settings#getSPMetadata()} signs with the SP key and certificate and swallows
-     * any failure at debug level, returning the unsigned document. So with
-     * {@code saml.security.sign_metadata=true} and no key material, {@code /sso/metadata} answers
-     * 200 with unsigned metadata and nothing says the request was dropped. An operator who turned
-     * signing on has no way to tell it is not happening.</p>
-     *
-     * <p>This is reported rather than refused: the metadata is still correct, only unsigned, and
-     * an IdP that does not check the signature keeps working. Refusing would turn a working
-     * deployment into a broken one on upgrade.</p>
-     *
-     * @param settings The SAML settings.
-     */
-    protected void warnIfMetadataCannotBeSigned(final Saml2Settings settings) {
-        if (settings.getSignMetadata() && (settings.getSPkey() == null || settings.getSPcert() == null)) {
-            logger.warn(
-                    "saml.security.sign_metadata is enabled but the SP metadata cannot be signed, so it is published unsigned. "
-                            + "Signing needs both saml.sp.privatekey and saml.sp.x509cert; missing: {}.",
-                    settings.getSPkey() == null
-                            ? (settings.getSPcert() == null ? "saml.sp.privatekey, saml.sp.x509cert" : "saml.sp.privatekey")
-                            : "saml.sp.x509cert");
-        }
-    }
-
-    /**
-     * Builds the response that serves the service provider metadata as {@code metadata.xml}.
+     * any {@code saml.idp.*} property exists: only the SP settings are validated.</p>
      *
      * @return the metadata response
      */
@@ -1329,29 +1013,16 @@ public class SamlAuthenticator implements SsoAuthenticator {
                 logger.debug("Accessing metadata with SAML Authenticator");
             }
             try {
-                final Saml2Settings settings = getSettings();
-                // checkSettings() with spValidationOnly is by definition checkSPSettings(), and
-                // mutating the shared settings instance to say so would leak into every other
-                // caller
-                final List<String> settingsErrors = settings.checkSPSettings();
-                if (!settingsErrors.isEmpty()) {
-                    final String msg = String.join(", ", settingsErrors);
-                    throw processFailure("Failed to process metadata.", msg);
-                }
-                warnIfMetadataCannotBeSigned(settings);
-                final String metadata = settings.getSPMetadata();
-                final List<String> errors = Saml2Settings.validateMetadata(metadata);
-                if (!errors.isEmpty()) {
-                    final String msg = String.join(", ", errors);
-                    throw processFailure("Failed to process metadata.", msg);
-                }
+                final String metadata = ServiceProvider.metadataOf(SamlConfig.fromMapForMetadata(buildProperties(true)));
                 return new StreamResponse("metadata.xml").contentType("application/samlmetadata+xml").stream(out -> {
                     try (final Writer writer = new OutputStreamWriter(out.stream(), Constants.UTF_8_CHARSET)) {
                         writer.write(metadata);
                     }
                 });
-            } catch (final SsoMessageException e) {
-                throw e;
+            } catch (final SamlConfigException e) {
+                // an anonymous request to a server whose settings are invalid: one line, not a stack trace per request
+                final String msg = sanitizeForLog(e.getMessage(), MAX_LOGGED_FAILURE_REASON_LENGTH);
+                throw processFailure("Failed to process metadata.", msg, new SsoStateException(msg));
             } catch (final Exception e) {
                 throw processFailure("Failed to process metadata.", e.getMessage(), e);
             }
@@ -1362,11 +1033,6 @@ public class SamlAuthenticator implements SsoAuthenticator {
      * Returns whether the request carries a SAML logout message, which is what the IdP sends to
      * the single logout service.
      *
-     * <p>{@code /sso/logout} is reachable without authentication, so it also receives plain visits
-     * that carry no SAML message at all. Those are not logout callbacks and must be rejected
-     * before {@code Auth.processSLO} sees them, because it answers them with an exception whose
-     * text describes the supported bindings rather than anything the visitor can act on.</p>
-     *
      * @param request The HTTP request.
      * @return true if the request carries a SAML logout request or response.
      */
@@ -1376,6 +1042,12 @@ public class SamlAuthenticator implements SsoAuthenticator {
 
     /**
      * Gets the logout response.
+     *
+     * <p>{@code /sso/logout} is anonymous and, because SAML requires {@code SameSite=none}, reachable
+     * cross-site with the victim's session cookie attached. The library decides: a LogoutRequest ends the
+     * session it names and no other, a session that did not come from SAML is never ended by one, and a
+     * LogoutResponse never ends a session.</p>
+     *
      * @return The logout response.
      */
     protected ActionResponse getLogoutResponse() {
@@ -1383,53 +1055,51 @@ public class SamlAuthenticator implements SsoAuthenticator {
             if (logger.isDebugEnabled()) {
                 logger.debug("Logging out with SAML Authenticator");
             }
-            final HttpServletResponse response = LaResponseUtil.getResponse();
             try {
                 if (!containsSamlLogoutMessage(request)) {
-                    // an anonymous request that is not a logout callback: rejected, not a fault,
-                    // so it carries an SsoStateException and is logged without a stack trace.
-                    // Checked before the configuration guard below, because otherwise a
-                    // deployment that leaves single logout unconfigured would answer the very
-                    // same anonymous visit with a stack trace per request.
-                    final String msg = "This endpoint expects a SAML logout message from the IdP.";
+                    final String msg = "The request carries no SAML logout message.";
                     throw processFailure("Failed to log out.", msg, new SsoStateException(msg));
                 }
-                final Saml2Settings settings = getSettings();
-                if (settings.getIdpSingleLogoutServiceResponseUrl() == null) {
-                    final String msg = "IdP single logout service URL is not configured.";
-                    throw processFailure("Failed to log out.", msg);
+                final ServiceProvider provider = getServiceProvider();
+                if (provider.config().singleLogoutServiceUrl() == null) {
+                    throw processFailure("Failed to log out.", "IdP single logout service URL is not configured.");
                 }
-                final Auth auth = new Auth(settings, request, response);
-                // A LogoutRequest that names somebody else must not take this session with it, but
-                // it is still answered with an ordinary LogoutResponse: an error would tell an
-                // unauthenticated sender whether it guessed a live session, and would leave a
-                // confused-but-legitimate IdP with no way of finishing its own logout.
-                //
-                // A LogoutResponse never ends a session at all; see isLogoutResponse.
-                final boolean keepLocalSession = isLogoutResponse(request) || isLogoutRequestForAnotherUser(request, settings);
-                warnIfLogoutResponseReachedALiveLogin(request);
-                // stay=true keeps java-saml from committing the servlet response itself
-                final String redirectUrl = auth.processSLO(keepLocalSession, null, true);
-                final List<String> errors = auth.getErrors();
-                if (!errors.isEmpty()) {
-                    // java-saml refused the message the sender supplied -- a replayed ID, a bad
-                    // signature, a missing NameID, XML that will not parse. The endpoint is
-                    // anonymous and, because SAML requires SameSite=none, reachable cross-site, so
-                    // this is a rejected request rather than a fault: an SsoStateException gets it
-                    // logged without a stack trace, the way getLoginCredential already treats a
-                    // callback it did not start.
-                    // The errors can carry the StatusCode of an unsigned LogoutResponse as the
-                    // sender wrote it, and SsoAction logs this message verbatim.
-                    final String msg = sanitizeForLog(String.join(", ", errors), MAX_LOGGED_FAILURE_REASON_LENGTH);
+                final SamlUser samlUser = getSessionSamlUser();
+                final String sessionNameId = samlUser == null ? null : samlUser.getName();
+                final String sessionIndex = samlUser == null ? null : samlUser.getSessionIndex();
+                // The IdP sends the message with the binding the SP metadata names for it, and an IdP such as
+                // Keycloak posts it by default: the redirect binding carries it in the query string, the POST
+                // binding in the form.
+                final LogoutOutcome outcome = "POST".equalsIgnoreCase(request.getMethod())
+                        ? provider.handleLogoutPost(request.getParameter("SAMLRequest"), request.getParameter("SAMLResponse"),
+                                request.getParameter("RelayState"), sessionNameId, sessionIndex)
+                        : provider.handleLogout(request.getMethod(), request.getQueryString(), sessionNameId, sessionIndex);
+                if (outcome.action() == LogoutOutcome.Action.REJECTED) {
+                    // The sender's own input, bounded and stripped of control characters by the library; the
+                    // message is logged by SsoAction without a stack trace.
+                    final String msg = sanitizeForLog(outcome.reason() + ": " + outcome.detail(), MAX_LOGGED_FAILURE_REASON_LENGTH);
                     throw processFailure("Failed to log out.", msg, new SsoStateException(msg));
                 }
-                if (StringUtil.isNotBlank(redirectUrl)) {
+                if (outcome.action() == LogoutOutcome.Action.KEEP_SESSION && samlUser != null && outcome.redirectUrl() != null) {
+                    logger.warn("The LogoutRequest does not name this session's user, so it is answered without ending the session."
+                            + " If a legitimate single logout stopped working, compare the NameID the IdP puts in its assertion with the one"
+                            + " it puts in its LogoutRequest: {}", sanitizeForLog(outcome.detail(), MAX_LOGGED_FAILURE_REASON_LENGTH));
+                }
+                if (outcome.action() == LogoutOutcome.Action.END_SESSION) {
+                    final HttpSession session = request.getSession(false);
+                    if (session != null) {
+                        session.invalidate();
+                    }
+                }
+                if (StringUtil.isNotBlank(outcome.redirectUrl())) {
                     // an IdP-initiated LogoutRequest: send our LogoutResponse back to the IdP
-                    return HtmlResponse.fromRedirectPathAsIs(redirectUrl);
+                    return HtmlResponse.fromRedirectPathAsIs(outcome.redirectUrl());
                 }
                 throw new SsoMessageException(messages -> messages.addSuccessSsoLogout(UserMessages.GLOBAL_PROPERTY_KEY), "Logged out");
             } catch (final SsoMessageException e) {
                 throw e;
+            } catch (final SamlConfigException e) {
+                throw processFailure("Failed to log out.", sanitizeForLog(e.getMessage(), MAX_LOGGED_FAILURE_REASON_LENGTH), e);
             } catch (final Exception e) {
                 throw processFailure("Failed to log out.", e.getMessage(), e);
             }
@@ -1437,151 +1107,10 @@ public class SamlAuthenticator implements SsoAuthenticator {
     }
 
     /**
-     * Returns whether the incoming logout message is a LogoutResponse, in which case it must not
-     * end the local session.
+     * Bounds a value to {@link #MAX_LOGGED_NAME_ID_LENGTH} and strips its control characters so that it can be
+     * embedded in a log message.
      *
-     * <p>A LogoutResponse is the answer to a LogoutRequest this SP sent, and {@code LogoutAction}
-     * has already ended the local login by the time one can arrive: it asks the SSO manager for
-     * the redirect URL and then calls {@code logout()}, which invalidates the session. Whatever
-     * session the answer lands on is therefore a fresh one, so invalidating it ends nothing that
-     * was still running -- and that is the only thing a legitimate LogoutResponse gave up here.</p>
-     *
-     * <p>What it costs is the rest of the deployment. {@code /sso/logout} is anonymous and,
-     * because SAML requires {@code SameSite=none}, reachable cross-site with the victim's session
-     * cookie attached. {@code Auth#processSLO} is given no request ID to bind the answer to -- the
-     * SP has none to give, having just discarded the session that would have held it -- so
-     * java-saml skips the {@code InResponseTo} comparison, and with the shipped
-     * {@code saml.security.want_messages_signed=false} every remaining check is conditional on an
-     * attribute the sender may simply omit: {@code Issuer}, {@code Destination}, and the
-     * {@code InResponseTo} attribute itself. A LogoutResponse carrying nothing but a Success
-     * status was therefore enough to invalidate any session it was pointed at -- a SAML login, a
-     * local one, or a login still in flight, whose pending AuthnRequest ID went with the session
-     * and left the user unable to log in while the page kept firing. No signature, no guess, and
-     * nothing in the log.</p>
-     *
-     * <p>This is the same exposure {@link #isLogoutRequestForAnotherUser} closes for the other
-     * kind of message, where the NameID is what costs the sender a guess. A LogoutResponse carries
-     * no NameID, so there is nothing to compare -- and nothing that needs comparing, because there
-     * is nothing left for it to end.</p>
-     *
-     * @param request The HTTP request carrying the SAML logout message.
-     * @return true if the message is a LogoutResponse.
-     */
-    protected boolean isLogoutResponse(final HttpServletRequest request) {
-        return StringUtil.isBlank(request.getParameter("SAMLRequest")) && StringUtil.isNotBlank(request.getParameter("SAMLResponse"));
-    }
-
-    /**
-     * Reports a LogoutResponse that reached a session which is still logged in.
-     *
-     * <p>The legitimate answer arrives after {@code LogoutAction} has ended the login, so this
-     * says nothing on the path a logout actually takes. It says something on the one it does not:
-     * a LogoutResponse aimed at a live login answers a logout that was never started, which is
-     * either a stale replay out of a browser's history or a request forged to end somebody's
-     * session. Reporting it is what makes the attempt visible; the session is kept either way.</p>
-     *
-     * <p>One bounded line and no stack trace, for the reason the rest of this endpoint gives: it
-     * is anonymous, so a rejected message must not let an unauthenticated client fill the log.
-     * Nothing the sender supplied is echoed, because nothing in the message was validated.</p>
-     *
-     * @param request The HTTP request carrying the SAML logout message.
-     */
-    protected void warnIfLogoutResponseReachedALiveLogin(final HttpServletRequest request) {
-        if (!isLogoutResponse(request) || !isLoggedIn()) {
-            return;
-        }
-        logger.warn("A SAML LogoutResponse reached a session that is still logged in, so it is answered without ending it."
-                + " A LogoutResponse answers a LogoutRequest this server sent, and this server had not sent one:"
-                + " the message is a replay or was forged to end the session. An IdP that starts a logout sends a LogoutRequest instead.");
-    }
-
-    /**
-     * Returns whether this session is logged in, answering false when that cannot be determined.
-     *
-     * @return true if a user is logged in.
-     */
-    protected boolean isLoggedIn() {
-        try {
-            return getSavedUserBean().isPresent();
-        } catch (final Exception e) {
-            // this endpoint has to keep working for a request that reaches it outside a login
-            // scope, so being unable to look at the session means "cannot tell", not "fail"
-            if (logger.isDebugEnabled()) {
-                logger.debug("Failed to read the session user.", e);
-            }
-            return false;
-        }
-    }
-
-    /**
-     * Returns whether an IdP-initiated LogoutRequest names somebody other than the user this
-     * session is logged in as, in which case the session must survive it.
-     *
-     * <p>{@code /sso/logout} is anonymous and, because SAML requires {@code SameSite=none}, is
-     * reachable cross-site with the victim's session cookie attached. With the shipped default
-     * {@code saml.security.want_messages_signed=false} java-saml accepts a LogoutRequest that
-     * carries no signature, and every other check it makes is conditional on an attribute the
-     * sender simply omits -- {@code NotOnOrAfter}, {@code Destination}, and even {@code Issuer},
-     * which the protocol schema declares optional and whose absence therefore skips the entity ID
-     * comparison as well. The NameID is the one element java-saml insists on, so it is the one
-     * thing left worth checking, and comparing it with the session costs an attacker the guess.</p>
-     *
-     * <p>A LogoutResponse the IdP is answering ({@code SAMLResponse}) is left alone here: it
-     * carries no NameID to compare, and constructing a {@link LogoutRequest} from such a request
-     * would silently build a fresh outgoing message rather than parse anything.
-     * {@link #isLogoutResponse(HttpServletRequest)} keeps the session for that kind of message
-     * instead, on the ground that there is nothing left for it to end.</p>
-     *
-     * <p>Anything that is not a clear mismatch keeps the previous behaviour of ending the session:
-     * no user logged in, a user who did not come from SAML, a message whose NameID cannot be read
-     * at all. Those are properties of this deployment or of a message java-saml is about to reject
-     * anyway, not values a sender chooses.</p>
-     *
-     * <p>A NameID that is read but empty is not one of them. It is the sender's own input, so
-     * treating it as "cannot tell" would hand back exactly the bypass this method exists to close:
-     * java-saml requires the {@code <saml:NameID>} element to be present but does not require it to
-     * carry anything, so {@code <saml:NameID/>} parses, names nobody, and would end any session it
-     * reached. It is therefore compared like any other value and, naming nobody, never matches. No
-     * IdP is lost by this: one that ends a session says whose.</p>
-     *
-     * @param request The HTTP request carrying the SAML logout message.
-     * @param settings The SAML settings, used to parse the LogoutRequest the way java-saml
-     *            itself parses it a moment later.
-     * @return true if the session must be kept because the LogoutRequest names another user.
-     */
-    protected boolean isLogoutRequestForAnotherUser(final HttpServletRequest request, final Saml2Settings settings) {
-        if (StringUtil.isBlank(request.getParameter("SAMLRequest"))) {
-            return false;
-        }
-        final String sessionNameId = getSessionSamlNameId();
-        if (StringUtil.isBlank(sessionNameId)) {
-            return false;
-        }
-        final String logoutRequestNameId = getLogoutRequestNameId(request, settings);
-        if (logoutRequestNameId == null) {
-            // the message could not be read at all; java-saml is about to fail on the same bytes
-            return false;
-        }
-        if (isSameNameId(sessionNameId, logoutRequestNameId)) {
-            return false;
-        }
-        logger.warn("The LogoutRequest names '{}' but this session is logged in as '{}', so it is answered without ending the session."
-                + " If a legitimate single logout stopped working, compare the NameID the IdP puts in its assertion with the one it puts"
-                + " in its LogoutRequest.", sanitizeForLog(logoutRequestNameId), sanitizeForLog(sessionNameId));
-        return true;
-    }
-
-    /**
-     * Bounds a NameID and strips its control characters so that it can be embedded in a log
-     * message.
-     *
-     * <p>The NameID of the LogoutRequest reaches this log before anything has authenticated the
-     * message -- that is the whole point of the check that reports it -- so a raw newline in it
-     * would let an unauthenticated sender forge log lines. It is XML text content, so it can hold
-     * one. {@code SpnegoAuthenticator} bounds the realm it logs for the same reason and in the
-     * same way.</p>
-     *
-     * @param value The NameID to embed in a log message.
+     * @param value The value to embed in a log message.
      * @return A value safe to embed in a log message.
      */
     protected static String sanitizeForLog(final String value) {
@@ -1597,29 +1126,26 @@ public class SamlAuthenticator implements SsoAuthenticator {
      * @return A value safe to embed in a log message.
      */
     protected static String sanitizeForLog(final String value, final int maxLength) {
-        final String bounded = value.length() > maxLength ? value.substring(0, maxLength) + "..." : value;
+        final String text = value == null ? "null" : value;
+        final String bounded = text.length() > maxLength ? text.substring(0, maxLength) + "..." : text;
         return LOG_UNSAFE_PATTERN.matcher(bounded).replaceAll("?");
     }
 
     /**
-     * Returns the NameID this session was logged in with, or null when it did not come from SAML.
+     * Returns the SAML user of this session, or null when it did not come from SAML.
      *
-     * <p>{@code SamlUser.getName()} is that NameID rather than a display name: it is what
-     * {@link #logout(FessUserBean)} passes as the {@code nameId} of the LogoutRequest it sends,
-     * so the IdP is expected to name the same value when the logout starts at its end.</p>
+     * <p>Being unable to look at the session means "cannot tell", not "fail": this endpoint has to keep
+     * working for a request that reaches it outside a login scope.</p>
      *
-     * @return The NameID of the session user, or null when nobody is logged in, when the user did
-     *         not authenticate through SAML, or when the session cannot be reached at all.
+     * @return The SAML user of the session, or null.
      */
-    protected String getSessionSamlNameId() {
+    protected SamlUser getSessionSamlUser() {
         try {
             final FessUserBean userBean = getSavedUserBean().orElse(null);
             if (userBean != null && userBean.getFessUser() instanceof final SamlUser samlUser) {
-                return samlUser.getName();
+                return samlUser;
             }
         } catch (final Exception e) {
-            // this endpoint has to keep working for a request that reaches it outside a login
-            // scope, so being unable to look at the session means "cannot tell", not "fail"
             if (logger.isDebugEnabled()) {
                 logger.debug("Failed to read the session user.", e);
             }
@@ -1630,92 +1156,12 @@ public class SamlAuthenticator implements SsoAuthenticator {
     /**
      * Returns the user bean held by the session.
      *
-     * <p>Separate from {@link #getSessionSamlNameId()} so that a test can decide who is logged in
-     * without standing up a login scope; {@code /api/v2} does the same with its own handlers.</p>
+     * <p>Separate from {@link #getSessionSamlUser()} so that a test can decide who is logged in
+     * without standing up a login scope.</p>
      *
      * @return The user bean of the session, empty when nobody is logged in.
      */
     protected OptionalThing<FessUserBean> getSavedUserBean() {
         return ComponentUtil.getFessLoginAssist().getSavedUserBean();
-    }
-
-    /**
-     * Returns the NameID carried by the incoming LogoutRequest, or null when it cannot be read.
-     *
-     * <p>The message is decoded and parsed with java-saml rather than by hand. {@code /sso/logout}
-     * is anonymous, so hand-parsing the base64 {@code SAMLRequest} here would put an XML parser --
-     * and therefore an XXE surface -- in front of an unauthenticated sender, whereas
-     * {@code Util.base64decodedInflated} and {@code Util.loadXML} are the hardened path the
-     * library uses on the same bytes a moment later. The arguments mirror
-     * {@code LogoutRequest.isValid()} exactly, including the allowed key transport algorithms, so
-     * an encrypted NameID is read here under the same restrictions it would be read under a moment
-     * later and this adds no decryption the message was not going to get anyway.</p>
-     *
-     * <p>It parses once. Constructing a {@link LogoutRequest} to reach the decoded XML would parse
-     * it a second time, because that constructor loads the document itself and then discards it,
-     * and a parse that fails is not free: java-saml logs the failure with its stack trace, so each
-     * extra parse of a message that will not parse writes another ~90 lines to the log. This
-     * endpoint is anonymous and, because SAML requires {@code SameSite=none}, reachable cross-site
-     * with the victim's cookie attached, which is exactly when this method runs -- so the second
-     * parse fell on the sessions an attacker targets.</p>
-     *
-     * <p>Nothing here is allowed to abort the logout. A malformed message, an {@code EncryptedID}
-     * with no SP private key configured to open it, an unreadable NameID: all of them mean "cannot
-     * tell", which {@link #isLogoutRequestForAnotherUser} turns back into the previous behaviour.
-     * Parsing here touches no replay cache -- only {@code isValid()} registers a message ID -- so
-     * reading the NameID does not make java-saml reject its own copy as a replay.</p>
-     *
-     * @param request The HTTP request carrying the LogoutRequest.
-     * @param settings The SAML settings.
-     * @return The NameID of the LogoutRequest, or null when it cannot be read.
-     */
-    protected String getLogoutRequestNameId(final HttpServletRequest request, final Saml2Settings settings) {
-        final String logoutRequestMessage = request.getParameter("SAMLRequest");
-        if (StringUtil.isBlank(logoutRequestMessage)) {
-            // a LogoutResponse, or no SAML message at all: there is no LogoutRequest to read
-            return null;
-        }
-        try {
-            final Document document = Util.loadXML(Util.base64decodedInflated(logoutRequestMessage));
-            if (document == null) {
-                // Util.loadXML answers unparsable XML, and anything holding an ENTITY, with null
-                return null;
-            }
-            return LogoutRequest.getNameId(document, settings.getSPkey(), settings.isTrimNameIds(),
-                    settings.getAllowedKeyTransportAlgorithms());
-        } catch (final Exception e) {
-            if (logger.isDebugEnabled()) {
-                logger.debug("Failed to read the NameID of the LogoutRequest.", e);
-            }
-            return null;
-        }
-    }
-
-    /**
-     * Returns whether two NameIDs identify the same user.
-     *
-     * <p>Deliberately more forgiving than {@code equals}, because the damage of the two comparisons
-     * is not symmetric: a false match only leaves today's behaviour in place, while a false
-     * mismatch breaks a legitimate single logout, which is silent and looks like the session simply
-     * refusing to end.</p>
-     *
-     * <p>Both sides are trimmed. The NameID stored at login and the NameID of the LogoutRequest
-     * are read from the text content of two different XML documents, and java-saml trims neither
-     * unless {@code saml.parsing.trim_name_ids} is turned on, which Fess leaves off; an IdP that
-     * pretty-prints one message and not the other would otherwise look like a different user.</p>
-     *
-     * <p>The comparison also ignores case. NameIDs that differ only in case are the same account
-     * at every IdP that produces them -- an email address or a UPN -- and an IdP that normalises
-     * case differently between its assertion and its LogoutRequest is a real deployment, not a
-     * hypothetical one. It costs nothing to defend against: a sender who does not know the NameID
-     * fails whatever the case, and one who does gains nothing from being allowed to change it.</p>
-     *
-     * @param sessionNameId The NameID this session was logged in with, not blank.
-     * @param logoutRequestNameId The NameID carried by the LogoutRequest, never null but possibly
-     *            blank, which the session NameID cannot be and so never matches.
-     * @return true if both name the same user.
-     */
-    protected boolean isSameNameId(final String sessionNameId, final String logoutRequestNameId) {
-        return sessionNameId.trim().equalsIgnoreCase(logoutRequestNameId.trim());
     }
 }
