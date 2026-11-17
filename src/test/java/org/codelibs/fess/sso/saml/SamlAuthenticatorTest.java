@@ -31,6 +31,7 @@ import org.codelibs.core.misc.DynamicProperties;
 import org.codelibs.fess.app.web.base.login.ActionResponseCredential;
 import org.codelibs.fess.exception.SsoLoginException;
 import org.codelibs.fess.exception.SsoMessageException;
+import org.codelibs.fess.mylasta.action.FessMessages;
 import org.codelibs.fess.exception.SsoStateException;
 import org.codelibs.fess.mylasta.action.FessUserBean;
 import org.codelibs.fess.sso.SsoResponseType;
@@ -1300,6 +1301,31 @@ public class SamlAuthenticatorTest extends SamlTestCase {
                 Assertions.assertThrows(SsoMessageException.class, () -> authenticator.getResponse(SsoResponseType.LOGOUT));
 
         assertTrue(String.valueOf(garbage.getCause()), garbage.getCause() instanceof SsoStateException);
+    }
+
+    @Test
+    public void test_getLogoutResponse_showsOnlyTheReasonCodeOfARejectedLogoutMessage() throws Exception {
+        // The detail of a refused message quotes what the sender wrote (here the SigAlg of a redirect). It goes to the log;
+        // the login page that the anonymous caller is sent to must show the reason code and nothing the caller chose.
+        final SamlAuthenticator authenticator = createAuthenticator();
+        setUpSlo();
+        final MockletHttpServletRequest request = getMockRequest();
+        final String text = "Your session expired. Call IT and give your password";
+        request.setMethod("GET");
+        request.setParameter("SAMLRequest", "eA==");
+        request.setParameter("SigAlg", text);
+        request.setParameter("Signature", "AAAA");
+        request.setQueryString("SAMLRequest=eA%3D%3D&SigAlg=" + text.replace(" ", "%20") + "&Signature=AAAA");
+
+        final SsoMessageException e =
+                Assertions.assertThrows(SsoMessageException.class, () -> authenticator.getResponse(SsoResponseType.LOGOUT));
+
+        assertTrue(e.getCause().getMessage(), e.getCause().getMessage().contains(text));
+        final FessMessages messages = new FessMessages();
+        e.getMessageCode().message(messages);
+        final Object[] values = messages.accessByFlatIterator().next().getValues();
+        assertEquals(1, values.length);
+        assertEquals("INVALID_SIGNATURE", values[0]);
     }
 
     @Test
