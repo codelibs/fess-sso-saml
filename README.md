@@ -53,6 +53,7 @@ is the file that page saves to. Not `fess_config.properties`.
 | `saml.default.groups` | comma-separated groups added to every SAML login |
 | `saml.default.roles` | comma-separated roles added to every SAML login |
 | `saml.request.id.ttl` | how long an unanswered AuthnRequest ID stays usable, in seconds (default `3600`) |
+| `saml.session.end_with_idp` | a login session ends when the IdP's session ends (`SessionNotOnOrAfter` of the assertion, plus `saml.security.clock_drift`); `false` turns this off (default `true`). Needs a Fess whose `FessUser` has `isExpired()` (15.10) |
 
 Every other `saml.` key is passed to saml4j without the prefix, and a key it does not know is refused when
 the settings are built, so a mistyped security setting cannot go unnoticed. The security keys:
@@ -75,7 +76,7 @@ destination, issuer and validity period are always checked, and a response has t
 started.
 
 The `saml.` keys above are read by scanning `system.properties`, so `-Dfess.system.saml....` does
-not reach them. It does reach `saml.request.id.ttl`, `saml.attribute.group.name`,
+not reach them. It does reach `saml.request.id.ttl`, `saml.session.end_with_idp`, `saml.attribute.group.name`,
 `saml.attribute.role.name`, `saml.default.groups` and `saml.default.roles`, which are read through
 `FessProp.getSystemProperty`.
 

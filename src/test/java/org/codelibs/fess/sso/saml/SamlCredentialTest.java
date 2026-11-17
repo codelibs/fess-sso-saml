@@ -127,4 +127,41 @@ public class SamlCredentialTest extends SamlTestCase {
         Assertions.assertEquals(java.util.Set.of("U" + USER, "Gdev", "Radmin"), java.util.Set.of(user.getPermissions()));
         assertSame(user.getPermissions(), user.getPermissions());
     }
+
+    @Test
+    public void test_user_isExpiredFromTheEndOfTheSessionOnward() throws Exception {
+        final long end = 1_000_000L;
+        final long[] now = { end - 1 };
+        final SamlUser user = new SamlUser(USER, "_session1", null, null, null, new String[0], new String[0], end) {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            protected long currentTimeMillis() {
+                return now[0];
+            }
+        };
+
+        assertFalse(user.isExpired());
+        now[0] = end;
+        assertTrue(user.isExpired());
+        now[0] = end + 1;
+        assertTrue(user.isExpired());
+    }
+
+    @Test
+    public void test_user_withoutAnEndIsNeverExpired() throws Exception {
+        final SamlUser user = new SamlUser(USER, "_session1", null, null, null, new String[0], new String[0]) {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            protected long currentTimeMillis() {
+                return Long.MAX_VALUE;
+            }
+        };
+
+        assertEquals(0L, user.getExpiresAt());
+        assertFalse(user.isExpired());
+        assertEquals(0L, new SamlCredential(login(USER, Map.of())).getUser().getExpiresAt());
+        assertEquals(42L, new SamlCredential(login(USER, Map.of()), 42L).getUser().getExpiresAt());
+    }
 }

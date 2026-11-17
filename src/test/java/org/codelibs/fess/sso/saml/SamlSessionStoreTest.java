@@ -155,6 +155,20 @@ public class SamlSessionStoreTest extends UnitFessTestCase {
     }
 
     @Test
+    public void test_user_endOfTheSessionSurvivesTheStore() throws Exception {
+        // another node must end the session at the same time
+        final SessionDataSerializer serializer = registered();
+        for (final long expiresAt : new long[] { 0L, 1_790_000_000_000L }) {
+            final SamlUser original = new SamlUser("carol", null, null, null, null, new String[0], new String[0], expiresAt);
+
+            final FessUserBean restored =
+                    (FessUserBean) serializer.fromBytes(serializer.toBytes(attributes("u", new FessUserBean(original)))).get("u");
+
+            assertEquals(expiresAt, ((SamlUser) restored.getFessUser()).getExpiresAt());
+        }
+    }
+
+    @Test
     public void test_user_optionalValuesMayBeNullAndGroupsMayBeEmpty() throws Exception {
         final SessionDataSerializer serializer = registered();
         final SamlUser original = new SamlUser("bob", null, null, null, null, new String[0], null);
