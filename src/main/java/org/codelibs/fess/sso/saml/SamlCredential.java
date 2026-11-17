@@ -31,7 +31,7 @@ import org.codelibs.fess.entity.FessUser;
 import org.codelibs.fess.helper.SystemHelper;
 import org.codelibs.fess.mylasta.direction.FessConfig;
 import org.codelibs.fess.util.ComponentUtil;
-import org.codelibs.saml2.Auth;
+import org.codelibs.saml4j.LoginResult;
 import org.lastaflute.web.login.credential.LoginCredential;
 
 /**
@@ -56,15 +56,15 @@ public class SamlCredential implements LoginCredential, FessCredential {
 
     /**
      * Constructor.
-     * @param auth The SAML authentication.
+     * @param login The accepted login.
      */
-    public SamlCredential(final Auth auth) {
-        attributes = auth.getAttributes();
-        nameId = auth.getNameId();
-        nameIdFormat = auth.getNameIdFormat();
-        sessionIndex = auth.getSessionIndex();
-        nameidNameQualifier = auth.getNameIdNameQualifier();
-        nameidSPNameQualifier = auth.getNameIdSPNameQualifier();
+    public SamlCredential(final LoginResult.Authenticated login) {
+        attributes = login.attributes();
+        nameId = login.nameId().value();
+        nameIdFormat = login.nameId().format();
+        sessionIndex = login.sessionIndex();
+        nameidNameQualifier = login.nameId().nameQualifier();
+        nameidSPNameQualifier = login.nameId().spNameQualifier();
     }
 
     @Override

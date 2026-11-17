@@ -46,7 +46,6 @@ import com.esotericsoftware.kryo.io.Input;
 import com.esotericsoftware.kryo.io.Output;
 
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 
 /**
@@ -450,8 +449,7 @@ public class SamlSessionStoreTest extends UnitFessTestCase {
     private SamlAuthenticator consuming(final String requestId, final AtomicBoolean processed, final boolean detach) {
         return new SamlAuthenticator() {
             @Override
-            protected LoginCredential processSamlResponse(final HttpServletRequest request, final HttpServletResponse response,
-                    final Map<String, Long> requestIdMap) {
+            protected LoginCredential processSamlResponse(final HttpServletRequest request, final Map<String, Long> requestIdMap) {
                 if (!requestIdMap.containsKey(requestId)) {
                     return null;
                 }

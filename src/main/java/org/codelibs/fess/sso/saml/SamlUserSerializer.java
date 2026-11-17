@@ -29,7 +29,7 @@ import com.esotericsoftware.kryo.io.Output;
  * survives a request that another node answers.
  *
  * <p>What is written is what the code of this plugin and the session checks of Fess read from a logged-in
- * user: the NameID (the user name, and what {@link SamlAuthenticator#getSessionSamlNameId()} compares a
+ * user: the NameID (the user name, and what {@link SamlAuthenticator#getSessionSamlUser()} compares a
  * LogoutRequest with), the groups and the roles (the input of the permissions), and the four values of
  * {@link SamlAuthenticator#logout} that address the session at the IdP (the session index, the NameID format
  * and the two qualifiers).</p>

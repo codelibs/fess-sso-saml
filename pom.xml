@@ -19,7 +19,7 @@
 		<relativePath />
 	</parent>
 	<properties>
-		<java.saml.version>3.1.3-SNAPSHOT</java.saml.version>
+		<saml4j.version>0.1.0-SNAPSHOT</saml4j.version>
 	</properties>
 	<build>
 		<plugins>
@@ -59,11 +59,10 @@
 							<createDependencyReducedPom>false</createDependencyReducedPom>
 							<!-- No relocation. Santuario reads its own algorithm registry out of
 							     resource/config.xml under org/apache/xml/security and instantiates every
-							     entry by name, and Fess's log configuration addresses org.codelibs.saml2 as
-							     a logger name. Relocating would break both. -->
+							     entry by name. Relocating would break it. -->
 							<artifactSet>
 								<!-- What the war already carries. Declaring org.codelibs.fess:fess as provided
-								     does not keep the first five out on its own: when Fess and java-saml need the
+								     does not keep the first five out on its own: when Fess and saml4j need the
 								     same artifact, Maven keeps Fess's version but widens the scope to the widest
 								     of the two, so the node arrives at compile or runtime instead of provided and
 								     would be shaded.
@@ -72,12 +71,12 @@
 								     and five of them the war still ships at the very same version: slf4j-api,
 								     corelib, commons-codec and commons-lang3 are direct dependencies of Fess,
 								     and commons-text arrives there with fess-crawler and handlebars, so none of
-								     the five leaves the war together with java-saml. WEB-INF/lib precedes
+								     the five leaves the war together with saml4j. WEB-INF/lib precedes
 								     WEB-INF/plugin on every class path Fess builds, so a shaded copy would never
 								     be read anyway.
 								     woodstox-core is the sixth, and the only entry here that is not simply
 								     duplicate weight. xmlsec asks for it at runtime for its StAX API
-								     (org.apache.xml.security.stax), and java-saml 3.1.2 uses only the DOM one:
+								     (org.apache.xml.security.stax), and saml4j uses only the DOM one:
 								     its class constants name org.apache.xml.security.{encryption, exceptions,
 								     keys, signature, transforms, utils} and neither javax/xml/stream nor stax2 nor
 								     com/ctc/wstx. Shading it would be 1063 of 1940 jar entries for classes
@@ -93,9 +92,9 @@
 								     built from a real WEB-INF: with no woodstox anywhere, the SP metadata, its
 								     schema validation and the LogoutRequest NameID all still work and StAX falls
 								     back to the JDK implementation.
-								     That leaves java-saml, java-saml-core and xmlsec shaded in.
+								     That leaves saml4j and xmlsec shaded in.
 								     jakarta.xml.bind-api needs no exclusion here even though Fess excludes it
-								     from java-saml: xmlsec declares it provided, so it never reaches a consumer. -->
+								     from saml4j: xmlsec declares it provided, so it never reaches a consumer. -->
 								<excludes>
 									<exclude>com.fasterxml.woodstox:woodstox-core</exclude>
 									<exclude>commons-codec:*</exclude>
@@ -167,7 +166,7 @@
 		</repository>
 	</repositories>
 	<dependencies>
-		<!-- Declared before java-saml on purpose: Fess's own dependencies then arrive as
+		<!-- Declared before saml4j on purpose: Fess's own dependencies then arrive as
 		     provided transitive nodes, and most of what the war carries is therefore left out of
 		     the shade. Ordering does not settle every case: where the two paths disagree Maven
 		     keeps one node and widens its scope, and those arrive at compile or runtime instead.
@@ -186,8 +185,8 @@
 		</dependency>
 		<dependency>
 			<!-- The authenticator reads the assertion off the HttpServletRequest and stores the
-			     pending AuthnRequest IDs in the HttpSession. Neither Fess nor java-saml passes this
-			     on (both declare it provided), so it has to be named here.
+			     pending AuthnRequest IDs in the HttpSession. Fess does not pass this on
+			     (it is declared provided), so it has to be named here.
 			     provided, not shaded: the servlet container supplies it, and the webapp is the only
 			     place this component is ever built (see the manifest entry above). init() touches no
 			     servlet type, so the class also loads in a process that has none. -->
@@ -198,8 +197,8 @@
 		</dependency>
 		<dependency>
 			<groupId>org.codelibs</groupId>
-			<artifactId>java-saml</artifactId>
-			<version>${java.saml.version}</version>
+			<artifactId>saml4j</artifactId>
+			<version>${saml4j.version}</version>
 		</dependency>
 		<dependency>
 			<!-- The mock servlet request, session and response the moved test drives the
