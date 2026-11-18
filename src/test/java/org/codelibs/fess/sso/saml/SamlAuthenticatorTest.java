@@ -418,6 +418,67 @@ public class SamlAuthenticatorTest extends SamlTestCase {
     }
 
     // ===================================================================================
+    //                                                                     End of the session
+    //                                                                     ==================
+    private static org.codelibs.saml4j.LoginResult.Authenticated loginEndingAt(final java.time.Instant end) {
+        return new org.codelibs.saml4j.LoginResult.Authenticated(org.codelibs.saml4j.NameId.of("alice@example.com"), "_session1", end,
+                Map.of(), "_request1");
+    }
+
+    @Test
+    public void test_getSessionExpiresAt_addsTheDriftTheLoginWasAcceptedWith() throws Exception {
+        // saml4j accepts a login until SessionNotOnOrAfter plus the drift; ending the session earlier would expire
+        // a login that was just accepted, and the next login would be accepted and expired the same way
+        final SamlAuthenticator authenticator = createAuthenticator();
+        setUpIdp();
+        ComponentUtil.getSystemProperties().setProperty("saml.security.clock_drift", "90");
+        final java.time.Instant end = java.time.Instant.parse("2026-11-18T10:00:00Z");
+
+        assertEquals(end.toEpochMilli() + 90_000L, authenticator.getSessionExpiresAt(loginEndingAt(end)));
+    }
+
+    @Test
+    public void test_getSessionExpiresAt_isZeroWhenTheIdpNamesNoEnd() throws Exception {
+        final SamlAuthenticator authenticator = createAuthenticator();
+        setUpIdp();
+
+        assertEquals(0L, authenticator.getSessionExpiresAt(loginEndingAt(null)));
+    }
+
+    @Test
+    public void test_getSessionExpiresAt_isZeroOnlyWhenSwitchedOffWithFalse() throws Exception {
+        final SamlAuthenticator authenticator = createAuthenticator();
+        setUpIdp();
+        final java.time.Instant end = java.time.Instant.parse("2026-11-18T10:00:00Z");
+        final DynamicProperties systemProperties = ComponentUtil.getSystemProperties();
+
+        for (final String off : new String[] { "false", "FALSE", " false " }) {
+            systemProperties.setProperty("saml.session.end_with_idp", off);
+            assertEquals(off, 0L, authenticator.getSessionExpiresAt(loginEndingAt(end)));
+        }
+        // control: anything else, including nothing and a value that is not understood, keeps the check on
+        for (final String on : new String[] { "true", "", "off", "0" }) {
+            systemProperties.setProperty("saml.session.end_with_idp", on);
+            assertTrue(on, authenticator.getSessionExpiresAt(loginEndingAt(end)) > end.toEpochMilli());
+        }
+        systemProperties.remove("saml.session.end_with_idp");
+        assertTrue(authenticator.getSessionExpiresAt(loginEndingAt(end)) > end.toEpochMilli());
+    }
+
+    @Test
+    public void test_theSwitchIsNotPassedToTheLibrary() throws Exception {
+        // saml4j refuses a key it does not know; the metadata is built from the same properties
+        final SamlAuthenticator authenticator = createAuthenticator();
+        setUpBaseUrl();
+        ComponentUtil.getSystemProperties().setProperty("saml.session.end_with_idp", "false");
+        getMockRequest();
+
+        final ActionResponse response = authenticator.getResponse(SsoResponseType.METADATA);
+
+        assertTrue(String.valueOf(response), response instanceof StreamResponse);
+    }
+
+    // ===================================================================================
     //                                                                            Metadata
     //                                                                            ========
     @Test

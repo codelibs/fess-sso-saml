@@ -176,8 +176,8 @@ public class SamlAuthenticator implements SsoAuthenticator {
     /**
      * The properties under {@code saml.} that this authenticator reads itself; they are not passed to the library.
      */
-    private static final Set<String> PLUGIN_KEYS =
-            Set.of("sp.base.url", "request.id.ttl", "attribute.group.name", "attribute.role.name", "default.groups", "default.roles");
+    private static final Set<String> PLUGIN_KEYS = Set.of("sp.base.url", "request.id.ttl", "session.end_with_idp", "attribute.group.name",
+            "attribute.role.name", "default.groups", "default.roles");
 
     /**
      * The {@code saml.} properties that earlier releases read and that no longer mean anything, with what to use
@@ -218,6 +218,12 @@ public class SamlAuthenticator implements SsoAuthenticator {
      * a positive value is honoured; see {@link #getRequestIdTtl()}.
      */
     protected static final String SAML_REQUEST_ID_TTL = "saml.request.id.ttl";
+
+    /**
+     * The property key that says whether a login session ends when the identity provider says its session ends
+     * ({@code SessionNotOnOrAfter}). Anything but {@code false} keeps it on; see {@link #isSessionEndWithIdp()}.
+     */
+    protected static final String SAML_SESSION_END_WITH_IDP = "saml.session.end_with_idp";
 
     /**
      * The time-to-live applied to an unanswered AuthnRequest ID when
@@ -923,11 +929,40 @@ public class SamlAuthenticator implements SsoAuthenticator {
      * @return The login credential.
      */
     protected LoginCredential createLoginCredential(final LoginResult.Authenticated authenticated) {
-        final SamlCredential samlCredential = new SamlCredential(authenticated);
+        final SamlCredential samlCredential = new SamlCredential(authenticated, getSessionExpiresAt(authenticated));
         if (logger.isDebugEnabled()) {
             logger.debug("SamlCredential: {}", samlCredential);
         }
         return samlCredential;
+    }
+
+    /**
+     * Tells whether a login session ends when the identity provider says its session ends. It is on unless
+     * {@code saml.session.end_with_idp} is {@code false}: a value that is not understood does not switch off a check
+     * that keeps a session from outliving the one it came from.
+     *
+     * @return {@code true} if the session ends with the one of the identity provider.
+     */
+    protected boolean isSessionEndWithIdp() {
+        final String value = ComponentUtil.getFessConfig().getSystemProperty(SAML_SESSION_END_WITH_IDP, "true");
+        return value == null || !"false".equalsIgnoreCase(value.trim());
+    }
+
+    /**
+     * Returns when the login session must end, in epoch milliseconds, or 0 when it has no end of its own.
+     *
+     * <p>The library accepts a login up to {@code clock_drift} seconds after the {@code SessionNotOnOrAfter} of the
+     * assertion, so the same drift is added here: a login that was accepted is never expired by the first request,
+     * and an identity provider whose clock is ahead cannot make the user log in again and again.</p>
+     *
+     * @param authenticated The accepted login.
+     * @return The end of the session in epoch milliseconds, or 0.
+     */
+    protected long getSessionExpiresAt(final LoginResult.Authenticated authenticated) {
+        if (authenticated.sessionNotOnOrAfter() == null || !isSessionEndWithIdp()) {
+            return 0L;
+        }
+        return authenticated.sessionNotOnOrAfter().toEpochMilli() + getServiceProvider().config().clockDriftSeconds() * 1000L;
     }
 
     @Override

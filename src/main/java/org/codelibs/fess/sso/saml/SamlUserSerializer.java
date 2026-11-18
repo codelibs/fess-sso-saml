@@ -71,6 +71,7 @@ public class SamlUserSerializer extends Serializer<SamlUser> {
         writeString(output, user.getNameidSPNameQualifier());
         writeValues(output, user.getGroupNames());
         writeValues(output, user.getRoleNames());
+        output.writeVarLong(Math.max(0L, user.getExpiresAt()), true);
     }
 
     @Override
@@ -85,7 +86,8 @@ public class SamlUserSerializer extends Serializer<SamlUser> {
         final String spNameQualifier = readString(input);
         final String[] groups = readValues(input);
         final String[] roles = readValues(input);
-        return new SamlUser(nameId, sessionIndex, nameIdFormat, nameQualifier, spNameQualifier, groups, roles);
+        final long expiresAt = input.readVarLong(true);
+        return new SamlUser(nameId, sessionIndex, nameIdFormat, nameQualifier, spNameQualifier, groups, roles, expiresAt);
     }
 
     private static void writeString(final Output output, final String value) {

@@ -54,11 +54,23 @@ public class SamlCredential implements LoginCredential, FessCredential {
 
     private final String nameidSPNameQualifier;
 
+    private final long expiresAt;
+
     /**
-     * Constructor.
+     * Constructor of a login that has no end of its own.
      * @param login The accepted login.
      */
     public SamlCredential(final LoginResult.Authenticated login) {
+        this(login, 0L);
+    }
+
+    /**
+     * Constructor.
+     * @param login The accepted login.
+     * @param expiresAt When the login session must end, in epoch milliseconds, or 0 if it has no end of its own.
+     */
+    public SamlCredential(final LoginResult.Authenticated login, final long expiresAt) {
+        this.expiresAt = expiresAt;
         attributes = login.attributes();
         nameId = login.nameId().value();
         nameIdFormat = login.nameId().format();
@@ -97,7 +109,7 @@ public class SamlCredential implements LoginCredential, FessCredential {
      */
     public SamlUser getUser() {
         return new SamlUser(nameId, sessionIndex, nameIdFormat, nameidNameQualifier, nameidSPNameQualifier, getDefaultGroupsAsArray(),
-                getDefaultRolesAsArray());
+                getDefaultRolesAsArray(), expiresAt);
     }
 
     /**
@@ -199,7 +211,12 @@ public class SamlCredential implements LoginCredential, FessCredential {
         protected String nameidSPNameQualifier;
 
         /**
-         * Constructor.
+         * When the login session must end, in epoch milliseconds; 0 if it has no end of its own.
+         */
+        protected long expiresAt;
+
+        /**
+         * Constructor of a user whose login has no end of its own.
          * @param nameId The name ID.
          * @param sessionIndex The session index.
          * @param nameIdFormat The name ID format.
@@ -210,6 +227,23 @@ public class SamlCredential implements LoginCredential, FessCredential {
          */
         public SamlUser(final String nameId, final String sessionIndex, final String nameIdFormat, final String nameidNameQualifier,
                 final String nameidSPNameQualifier, final String[] groups, final String[] roles) {
+            this(nameId, sessionIndex, nameIdFormat, nameidNameQualifier, nameidSPNameQualifier, groups, roles, 0L);
+        }
+
+        /**
+         * Constructor.
+         * @param nameId The name ID.
+         * @param sessionIndex The session index.
+         * @param nameIdFormat The name ID format.
+         * @param nameidNameQualifier The name ID name qualifier.
+         * @param nameidSPNameQualifier The name ID SP name qualifier.
+         * @param groups The groups.
+         * @param roles The roles.
+         * @param expiresAt When the login session must end, in epoch milliseconds, or 0 if it has no end of its own.
+         */
+        public SamlUser(final String nameId, final String sessionIndex, final String nameIdFormat, final String nameidNameQualifier,
+                final String nameidSPNameQualifier, final String[] groups, final String[] roles, final long expiresAt) {
+            this.expiresAt = expiresAt;
             this.nameId = nameId;
             this.sessionIndex = sessionIndex;
             this.nameIdFormat = nameIdFormat;
@@ -245,6 +279,33 @@ public class SamlCredential implements LoginCredential, FessCredential {
                 permissions = permissionSet.toArray(new String[permissionSet.size()]);
             }
             return permissions;
+        }
+
+        /**
+         * Gets when the login session must end.
+         * @return The end of the session in epoch milliseconds, or 0 if it has no end of its own.
+         */
+        public long getExpiresAt() {
+            return expiresAt;
+        }
+
+        /**
+         * Tells whether the identity provider has ended the session this login came from
+         * ({@code SessionNotOnOrAfter} of the assertion, with the clock drift the login was accepted with). Fess asks it
+         * each time it looks up the logged-in user and ends the session when it is {@code true}.
+         *
+         * @return {@code true} if the session has ended.
+         */
+        public boolean isExpired() {
+            return expiresAt > 0L && currentTimeMillis() >= expiresAt;
+        }
+
+        /**
+         * Gets the current time.
+         * @return The current time in epoch milliseconds.
+         */
+        protected long currentTimeMillis() {
+            return System.currentTimeMillis();
         }
 
         /**
@@ -284,7 +345,7 @@ public class SamlCredential implements LoginCredential, FessCredential {
             return "SamlUser [groups=" + Arrays.toString(safe(groups)) + ", roles=" + Arrays.toString(safe(roles)) + ", permissions="
                     + Arrays.toString(safe(permissions)) + ", nameId=" + safe(nameId) + ", sessionIndex=" + safe(sessionIndex)
                     + ", nameIdFormat=" + safe(nameIdFormat) + ", nameidNameQualifier=" + safe(nameidNameQualifier)
-                    + ", nameidSPNameQualifier=" + safe(nameidSPNameQualifier) + "]";
+                    + ", nameidSPNameQualifier=" + safe(nameidSPNameQualifier) + ", expiresAt=" + expiresAt + "]";
         }
 
     }
