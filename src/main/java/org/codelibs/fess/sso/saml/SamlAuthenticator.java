@@ -1075,10 +1075,11 @@ public class SamlAuthenticator implements SsoAuthenticator {
                                 request.getParameter("RelayState"), sessionNameId, sessionIndex)
                         : provider.handleLogout(request.getMethod(), request.getQueryString(), sessionNameId, sessionIndex);
                 if (outcome.action() == LogoutOutcome.Action.REJECTED) {
-                    // The sender's own input, bounded and stripped of control characters by the library; the
-                    // message is logged by SsoAction without a stack trace.
+                    // The detail quotes the sender's own input, so it only goes to the log (SsoAction logs it without a
+                    // stack trace). /sso/logout is anonymous and reachable cross-site: showing the detail on the login
+                    // page would let anyone put text of their choosing there. The user sees the reason code only.
                     final String msg = sanitizeForLog(outcome.reason() + ": " + outcome.detail(), MAX_LOGGED_FAILURE_REASON_LENGTH);
-                    throw processFailure("Failed to log out.", msg, new SsoStateException(msg));
+                    throw processFailure("Failed to log out.", String.valueOf(outcome.reason()), new SsoStateException(msg));
                 }
                 if (outcome.action() == LogoutOutcome.Action.KEEP_SESSION && samlUser != null && outcome.redirectUrl() != null) {
                     logger.warn("The LogoutRequest does not name this session's user, so it is answered without ending the session."
