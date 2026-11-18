@@ -1100,7 +1100,10 @@ public class SamlAuthenticator implements SsoAuthenticator {
             } catch (final SsoMessageException e) {
                 throw e;
             } catch (final SamlConfigException e) {
-                throw processFailure("Failed to log out.", sanitizeForLog(e.getMessage(), MAX_LOGGED_FAILURE_REASON_LENGTH), e);
+                // an anonymous request to a server whose settings are invalid: one line, not a stack trace per request, and
+                // no setting names on the login page
+                throw processFailure("Failed to log out.", "The SAML settings are invalid.",
+                        new SsoStateException(sanitizeForLog(e.getMessage(), MAX_LOGGED_FAILURE_REASON_LENGTH)));
             } catch (final Exception e) {
                 throw processFailure("Failed to log out.", e.getMessage(), e);
             }

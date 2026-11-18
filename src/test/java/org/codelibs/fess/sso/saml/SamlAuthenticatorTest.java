@@ -1329,6 +1329,28 @@ public class SamlAuthenticatorTest extends SamlTestCase {
     }
 
     @Test
+    public void test_getLogoutResponse_withInvalidSettingsIsOneLineAndNamesNoSetting() throws Exception {
+        // /sso/logout is anonymous: while the settings are invalid every request would write a stack trace, and the
+        // login page it is sent to must not tell the caller which setting is wrong.
+        final SamlAuthenticator authenticator = createAuthenticator();
+        setUpSlo();
+        ComponentUtil.getSystemProperties().setProperty("saml.security.want_assertions_signd", "true");
+        final MockletHttpServletRequest request = getMockRequest();
+        request.setMethod("GET");
+        request.setParameter("SAMLRequest", "eA==");
+        request.setQueryString("SAMLRequest=eA%3D%3D");
+
+        final SsoMessageException e =
+                Assertions.assertThrows(SsoMessageException.class, () -> authenticator.getResponse(SsoResponseType.LOGOUT));
+
+        assertTrue(String.valueOf(e.getCause()), e.getCause() instanceof SsoStateException);
+        assertTrue(e.getCause().getMessage(), e.getCause().getMessage().contains("want_assertions_signd"));
+        final FessMessages messages = new FessMessages();
+        e.getMessageCode().message(messages);
+        assertEquals("The SAML settings are invalid.", messages.accessByFlatIterator().next().getValues()[0]);
+    }
+
+    @Test
     public void test_getLogoutResponse_sanitizesTheStatusCodeOfALogoutResponse() throws Exception {
         // The message of the exception is what SsoAction.logout writes to the log, and the
         // library puts the StatusCode of a failed LogoutResponse into the detail as the sender
