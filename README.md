@@ -68,7 +68,7 @@ the settings are built, so a mistyped security setting cannot go unnoticed. The 
 | `saml.security.allow_deprecated_alg` | `false`; accept SHA-1 signatures |
 | `saml.security.allow_rsa_1_5` | `false`; accept RSA 1.5 key transport |
 | `saml.security.clock_drift`, `saml.security.max_message_size` | `120` seconds, `1048576` bytes |
-| `saml.security.requested_authncontext`, `saml.security.requested_authncontextcomparison` | `Password`, `exact`; a blank value requests nothing |
+| `saml.security.requested_authncontext`, `saml.security.requested_authncontextcomparison` | `Password`, `exact`; a blank value requests nothing. It is only a request: the AuthnContext of the response is not checked, so do not rely on it to require a stronger authentication |
 | `saml.idp.x509certMulti.1`, `.2`, ... | more IdP certificates, for a key rollover |
 
 Either the Response or the Assertion must be signed, whatever these say. The audience, recipient,
