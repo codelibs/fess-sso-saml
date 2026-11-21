@@ -740,8 +740,13 @@ public class SamlAuthenticatorTest extends SamlTestCase {
             // authenticated and come straight back here, forever.
             assertNull(authenticator.getLoginCredential());
             assertEquals(1, warnings(appender).size(), String.valueOf(warnings(appender)));
-            assertTrue(warnings(appender).get(0), warnings(appender).get(0).contains("no matching AuthnRequest ID"));
-            assertTrue(warnings(appender).get(0), warnings(appender).get(0).contains("(1 pending)"));
+            final String warning = warnings(appender).get(0);
+            // The session was found and held an ID, so the cookie arrived: the SameSite advice would mislead.
+            assertTrue(warning, warning.contains("WRONG_IN_RESPONSE_TO - the response does not answer a pending request"));
+            assertTrue(warning, warning.contains("(1 pending AuthnRequest ID(s) in the session)"));
+            assertTrue(warning, warning.contains("this is not the SameSite case"));
+            assertFalse(warning, warning.contains("tomcat.sameSiteCookies"));
+            assertFalse(warning, warning.contains("no matching AuthnRequest ID"));
             // a refusal that says what to look at, and no stack trace for a request anyone can send
             appender.eventsAt(Level.WARN).forEach(e -> assertNull(e.getThrown(), String.valueOf(e.getThrown())));
             // A response nobody asked for must not be able to burn a login that is in flight:

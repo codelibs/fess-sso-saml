@@ -539,7 +539,7 @@ public class SamlAuthenticator implements SsoAuthenticator {
         }
         final LoginResult.Rejected rejected = (LoginResult.Rejected) result;
         if (rejected.reason() == Reason.WRONG_IN_RESPONSE_TO) {
-            logUnmatchedSamlResponse(requestIdMap.size());
+            logSamlResponseAnsweringNoPendingRequest(requestIdMap.size(), rejected.detail());
         } else {
             // Reported whatever the log level: the code alone says only that the login failed, and the detail
             // says what was objected to. It quotes the message, so the library bounds it and strips control
@@ -577,17 +577,17 @@ public class SamlAuthenticator implements SsoAuthenticator {
      * authenticated, which posts the same kind of unmatched assertion straight back, and the
      * loop only ends when the browser gives up.</p>
      *
-     * <p>The SameSite guidance below is what this case usually is, but only because the two ways
+     * <p>The SameSite guidance below is what this case usually is, but only because the ways
      * a login can instead have run out of time are reported elsewhere: an ID pruned by
      * {@link #SAML_REQUEST_ID_TTL} by {@link #logUnmatchedSamlResponseAfterExpiry(int)}, and a
      * session the container has already discarded by
-     * {@link #logUnmatchedSamlResponseAfterSessionExpiry()}. Without that split every expired
-     * login would read as a cookie misconfiguration, since neither leaves anything pending and
-     * both therefore reach this line with a pending count of zero as well.</p>
+     * {@link #logUnmatchedSamlResponseAfterSessionExpiry()}. A response that reaches a session
+     * which still holds pending IDs and answers none of them is reported by
+     * {@link #logSamlResponseAnsweringNoPendingRequest(int, String)}, since the cookie did arrive
+     * there. Without that split every one of them would read as a cookie misconfiguration.</p>
      *
-     * @param pendingCount How many pending AuthnRequest IDs the session held, so that a log can
-     *            tell a missing session cookie apart from a response that simply matched none of
-     *            several live logins.
+     * @param pendingCount How many pending AuthnRequest IDs the session held, which is zero
+     *            whenever this is reported.
      */
     protected void logUnmatchedSamlResponse(final int pendingCount) {
         logger.warn("""
@@ -595,6 +595,27 @@ public class SamlAuthenticator implements SsoAuthenticator {
                  The assertion consumer service is a cross-site POST, which does not carry a SameSite=Lax cookie;\
                  see tomcat.sameSiteCookies in tomcat_config.properties.\
                  An IdP-initiated (unsolicited) response is rejected for the same reason.""", pendingCount);
+    }
+
+    /**
+     * Logs the one line reported when a session that still holds pending AuthnRequest IDs receives a
+     * response that the library rejects as not answering a pending request.
+     *
+     * <p>The session was found and held pending IDs, so the browser did send its session cookie and
+     * this is not the {@code SameSite} case that {@link #logUnmatchedSamlResponse(int)} names. The
+     * library's detail says which part of the response failed to match: the response, the
+     * assertion or its subject confirmation naming another request or none, or the response and the
+     * assertion naming different ones. The text is the library's own, never the sender's, and is
+     * bounded like the other rejection details.</p>
+     *
+     * @param pendingCount How many pending AuthnRequest IDs the session held.
+     * @param detail The detail the library gave for the rejection.
+     */
+    protected void logSamlResponseAnsweringNoPendingRequest(final int pendingCount, final String detail) {
+        logger.warn("""
+                Authentication failed: {} - {} ({} pending AuthnRequest ID(s) in the session).\
+                 The session cookie did reach this server, so this is not the SameSite case.""", Reason.WRONG_IN_RESPONSE_TO,
+                sanitizeForLog(detail, MAX_LOGGED_FAILURE_REASON_LENGTH), pendingCount);
     }
 
     /**
