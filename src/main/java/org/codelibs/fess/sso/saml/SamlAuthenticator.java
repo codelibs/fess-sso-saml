@@ -647,8 +647,14 @@ public class SamlAuthenticator implements SsoAuthenticator {
      * is not sending the session cookie sends no session id at all, so a request that does carry
      * one demonstrably kept the cookie and lost only the session behind it.</p>
      *
-     * <p>Like the TTL case this is an ordinary event rather than a misconfiguration, and starting
-     * the login again resolves it. It names the container's session timeout instead of
+     * <p>The same request is what a second node sees when the login was started on another node
+     * and the session is not shared between them: it carries a session id that this node has never
+     * had. The line therefore names both causes, an expired session and a session that is not
+     * shared ({@code FESS_SESSION_STORE=opensearch} or a sticky session), since nothing on this
+     * node tells them apart. No value of the request is logged.</p>
+     *
+     * <p>An expired session is an ordinary event rather than a misconfiguration, and starting
+     * the login again resolves it. The line names the container's session timeout instead of
      * {@link #SAML_REQUEST_ID_TTL} on purpose, since raising the TTL cannot extend a session that
      * is already the shorter of the two.</p>
      *
@@ -658,11 +664,13 @@ public class SamlAuthenticator implements SsoAuthenticator {
      */
     protected void logUnmatchedSamlResponseAfterSessionExpiry() {
         logger.warn("""
-                Received a SAML response after the session it belongs to had expired.\
-                 The browser did return its session cookie, so this is not the SameSite case:\
-                 the session, and with it the AuthnRequest ID it held, was discarded by the\
-                 container's session timeout rather than by {}, so raising that value does not help.\
-                 Starting the login again resolves it.""", SAML_REQUEST_ID_TTL);
+                Received a SAML response whose session this node does not know.\
+                 The browser did return its session cookie, so this is not the SameSite case.\
+                 Either the session expired: it was discarded by the container's session timeout rather than by {},\
+                 so raising that value does not help, and starting the login again resolves it.\
+                 Or the login was started on another node and the session is not shared:\
+                 set FESS_SESSION_STORE=opensearch (the plugin has to be 15.10 on every node)\
+                 or pin the session to one node (sticky session).""", SAML_REQUEST_ID_TTL);
     }
 
     /**

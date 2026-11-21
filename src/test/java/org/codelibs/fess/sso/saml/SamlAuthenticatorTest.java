@@ -1224,7 +1224,7 @@ public class SamlAuthenticatorTest extends SamlTestCase {
             assertEquals(1, warnings(appender).size(), String.valueOf(warnings(appender)));
             final String warning = warnings(appender).get(0);
             assertTrue(warning, warning.contains("tomcat.sameSiteCookies"));
-            assertFalse(warning, warning.contains("session it belongs to had expired"));
+            assertFalse(warning, warning.contains("whose session this node does not know"));
         } finally {
             appender.detach();
         }
@@ -1253,10 +1253,16 @@ public class SamlAuthenticatorTest extends SamlTestCase {
             assertNull(authenticator.getLoginCredential());
             assertEquals(1, warnings(appender).size(), String.valueOf(warnings(appender)));
             final String warning = warnings(appender).get(0);
-            assertTrue(warning, warning.contains("session it belongs to had expired"));
+            assertTrue(warning, warning.contains("whose session this node does not know"));
             assertFalse(warning, warning.contains("tomcat.sameSiteCookies"));
             // raising the TTL cannot extend a session that is already the shorter of the two
             assertTrue(warning, warning.contains("raising that value does not help"));
+            // the same request reaches a node that never had the session, so that cause is named too
+            assertTrue(warning, warning.contains("Either the session expired"));
+            assertTrue(warning, warning.contains("FESS_SESSION_STORE=opensearch"));
+            assertTrue(warning, warning.contains("sticky session"));
+            // the session id the browser sent is not logged
+            assertFalse(warning, warning.contains("AB1C2D3E4F5061728394A5B6C7D8E9F0"));
         } finally {
             appender.detach();
         }
@@ -1283,7 +1289,7 @@ public class SamlAuthenticatorTest extends SamlTestCase {
             assertEquals(1, warnings(appender).size(), String.valueOf(warnings(appender)));
             final String warning = warnings(appender).get(0);
             assertTrue(warning, warning.contains("all 1 pending AuthnRequest ID(s) of the session had expired"));
-            assertFalse(warning, warning.contains("session it belongs to had expired"));
+            assertFalse(warning, warning.contains("whose session this node does not know"));
             assertFalse(warning, warning.contains("tomcat.sameSiteCookies"));
         } finally {
             appender.detach();

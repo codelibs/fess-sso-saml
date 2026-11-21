@@ -3,7 +3,8 @@
 ## 15.10
 
 The plugin uses [saml4j](https://github.com/codelibs/saml4j) instead of java-saml. The `saml.*` properties keep
-their names, and the endpoints, the session handling and the stored user are unchanged.
+their names, and the endpoints and the stored user are unchanged. Two things about sessions are new, and are
+described under [Sessions](#sessions) below.
 
 ### Properties that are no longer used
 
@@ -20,6 +21,17 @@ These are ignored, with one warning in the log that names them:
 
 Any other `saml.` property that the library does not know stops SAML logins with a message that names it, so that a
 mistyped security setting cannot go unnoticed.
+
+### Sessions
+
+* **The login ends with the IdP session.** With `saml.session.end_with_idp` (default `true`), a login ends at the
+  `SessionNotOnOrAfter` of the assertion plus `saml.security.clock_drift`, instead of lasting as long as the Fess
+  session. An IdP that sets a short session, such as Keycloak with its default of 10 hours, therefore logs users out
+  earlier than before. Set `saml.session.end_with_idp=false` to keep the previous behaviour.
+* **The login can be shared between nodes.** With `FESS_SESSION_STORE=opensearch` a login can start on one node and
+  finish on another, and the logged-in user is shared; without it SAML still needs sticky sessions. This needs plugin
+  15.10 on every node. Adding or removing an SSO plugin changes what the stored sessions contain, so it invalidates
+  them: users log in again.
 
 ### Behaviour that changed
 
