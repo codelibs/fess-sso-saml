@@ -1781,4 +1781,26 @@ public class SamlAuthenticatorTest extends SamlTestCase {
 
         assertEquals("http://localhost:8080/sso/logout", authenticator.buildDefaultUrl("/sso/logout"));
     }
+
+    @Test
+    public void test_describeControlCharacter_findsEveryControlAndSeparatorCharacter() throws Exception {
+        for (final String bad : new String[] { "\u0000", "\u0001", "\t", "\n", "\r", "\u001f", "\u007f", "\u0085", "\u009f", "\u2028",
+                "\u2029" }) {
+            final String described = SamlAuthenticator.describeControlCharacter("ab" + bad + "cd");
+            assertEquals(String.format("the control character U+%04X at position 2 of 5", (int) bad.charAt(0)), described);
+        }
+        assertEquals("the control character U+000A at position 0 of 1", SamlAuthenticator.describeControlCharacter("\n"));
+        // after a supplementary character the position is that of the char in the string
+        assertEquals("the control character U+0009 at position 2 of 3", SamlAuthenticator.describeControlCharacter("\uD83D\uDE00\t"));
+    }
+
+    @Test
+    public void test_describeControlCharacter_leavesOrdinaryNamesAlone() throws Exception {
+        assertNull(SamlAuthenticator.describeControlCharacter(null));
+        assertNull(SamlAuthenticator.describeControlCharacter(""));
+        for (final String name : new String[] { "alice@example.com", "first last", "o'brien+tag@example.com", "Zo\u00eb \u5c71\u7530",
+                "a\u00a0b", "a\u200bb", "emoji\uD83D\uDE00" }) {
+            assertNull(SamlAuthenticator.describeControlCharacter(name), name);
+        }
+    }
 }

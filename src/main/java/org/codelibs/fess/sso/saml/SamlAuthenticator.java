@@ -534,6 +534,14 @@ public class SamlAuthenticator implements SsoAuthenticator {
         final Set<String> candidates = new HashSet<>(getCandidateRequestIds(requestIdMap));
         final LoginResult result = getServiceProvider().finishLogin(request.getParameter("SAMLResponse"), candidates);
         if (result instanceof final LoginResult.Authenticated authenticated) {
+            final String unusable = describeControlCharacter(authenticated.nameId().value());
+            if (unusable != null) {
+                // The ID stays pending, as for any other response that is refused. The assertion itself cannot be
+                // used again: the library has recorded it.
+                logger.warn("Authentication failed: the NameID contains {}. It is the user name exactly as the identity provider"
+                        + " sent it, so it is not rewritten and the login is refused.", unusable);
+                return null;
+            }
             requestIdMap.remove(authenticated.requestId());
             return createLoginCredential(authenticated);
         }
@@ -546,6 +554,35 @@ public class SamlAuthenticator implements SsoAuthenticator {
             // characters; this endpoint is anonymous.
             logger.warn("Authentication failed: {} - {}", rejected.reason(),
                     sanitizeForLog(rejected.detail(), MAX_LOGGED_FAILURE_REASON_LENGTH));
+        }
+        return null;
+    }
+
+    /**
+     * Finds the first character of a user name that a name must not contain.
+     *
+     * <p>The NameID is the user name, the key of the permissions and the value a single logout request is
+     * matched against byte for byte, so it is kept as the identity provider sent it or not used at all. A line
+     * break, a TAB or another control character in it would be copied into every log line and screen that
+     * shows the name. The characters refused are those of {@link Character#isISOControl(int)} (Unicode
+     * {@code Cc}) and the line and paragraph separators {@code U+2028} and {@code U+2029} ({@code Zl},
+     * {@code Zp}). Spaces inside the name, letters of any script and punctuation such as {@code @}, {@code +}
+     * and {@code '} are not touched.</p>
+     *
+     * @param name The name the identity provider sent.
+     * @return A description of the first refused character that does not repeat the name, or null if there is none.
+     */
+    protected static String describeControlCharacter(final String name) {
+        if (name == null) {
+            return null;
+        }
+        for (int i = 0; i < name.length();) {
+            final int codePoint = name.codePointAt(i);
+            final int type = Character.getType(codePoint);
+            if (Character.isISOControl(codePoint) || type == Character.LINE_SEPARATOR || type == Character.PARAGRAPH_SEPARATOR) {
+                return String.format("the control character U+%04X at position %d of %d", codePoint, i, name.length());
+            }
+            i += Character.charCount(codePoint);
         }
         return null;
     }

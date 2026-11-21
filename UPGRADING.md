@@ -53,6 +53,10 @@ mistyped security setting cannot go unnoticed.
   one of `rsa-sha256`, `rsa-sha384`, `rsa-sha512` (or the ECDSA variants), and the outgoing signature algorithm
   `saml.security.signature_algorithm` is one of the three RSA ones.
 * **Attributes.** An `AttributeValue` that holds child elements instead of text is skipped.
+* **Control characters in the NameID.** The NameID is the user name and is kept exactly as the IdP sent it, so a
+  NameID that contains a control character (a line break, a TAB, `U+0085`, and the like, or `U+2028` / `U+2029`) is
+  not rewritten: the login is refused, with one warning that names the character and its position and not the value.
+  Spaces, letters of any script, `@`, `+` and `'` are accepted as before.
 * **Time.** An assertion whose `IssueInstant` is more than the clock drift in the future is refused.
 * **Logout of a session that did not come from SAML.** A LogoutRequest from the IdP never ends a local or admin
   session; it ends the SAML session it names.

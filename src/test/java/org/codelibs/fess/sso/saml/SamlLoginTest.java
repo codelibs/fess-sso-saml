@@ -77,6 +77,99 @@ public class SamlLoginTest extends SamlTestCase {
         }
     }
 
+    /** Logs in with the given NameID and checks that the login is refused for the control character named by code. */
+    private void assertNameIdRefused(final String nameId, final String code) throws Exception {
+        final SamlAuthenticator authenticator = createAuthenticatorWithControlledClock();
+        setUpLogin();
+        final MockletHttpServletRequest request = getMockRequest();
+        final LogCapturingAppender appender = LogCapturingAppender.attach(SamlAuthenticator.class);
+        try {
+            assertNull(login(authenticator, request, spec -> spec.nameId = nameId));
+
+            assertEquals(1, appender.warnings().size(), String.valueOf(appender.warnings()));
+            final String warning = appender.warnings().get(0);
+            assertTrue(warning, warning.startsWith("Authentication failed: the NameID contains the control character " + code + " at"));
+            // the reason is named, the value is not repeated, and nothing in the line can break it
+            assertTrue(warning, !warning.contains("example.com"));
+            assertTrue(warning, !warning.matches("(?s).*[\\p{Cntrl}\\u0085\\u2028\\u2029].*"));
+            appender.eventsAt(Level.WARN).forEach(e -> assertNull(e.getThrown(), String.valueOf(e.getThrown())));
+            // like any other refused response, it leaves the login waiting
+            assertEquals(1, pendingRequestIds(request.getSession(false)).size());
+        } finally {
+            appender.detach();
+        }
+    }
+
+    /** Logs in with the given NameID and checks that it becomes the user name exactly, without a warning. */
+    private void assertNameIdKept(final String nameId) throws Exception {
+        final SamlAuthenticator authenticator = createAuthenticatorWithControlledClock();
+        setUpLogin();
+        final LogCapturingAppender appender = LogCapturingAppender.attach(SamlAuthenticator.class);
+        try {
+            final LoginCredential credential = login(authenticator, getMockRequest(), spec -> spec.nameId = nameId);
+
+            assertEquals(nameId, userOf(credential).getName());
+            assertTrue(String.valueOf(appender.warnings()), appender.warnings().isEmpty());
+        } finally {
+            appender.detach();
+        }
+    }
+
+    @Test
+    public void test_aNameIdWithANewLineIsRefused() throws Exception {
+        assertNameIdRefused("ali\nce@example.com", "U+000A");
+    }
+
+    @Test
+    public void test_aNameIdWithATrailingNewLineIsRefused() throws Exception {
+        assertNameIdRefused("alice@example.com\n", "U+000A");
+    }
+
+    @Test
+    public void test_aNameIdWithATabIsRefused() throws Exception {
+        assertNameIdRefused("ali\tce@example.com", "U+0009");
+    }
+
+    @Test
+    public void test_aNameIdWithACarriageReturnIsRefused() throws Exception {
+        assertNameIdRefused("ali\rce@example.com", "U+000D");
+    }
+
+    @Test
+    public void test_aNameIdWithANextLineCharacterIsRefused() throws Exception {
+        assertNameIdRefused("ali\u0085ce@example.com", "U+0085");
+    }
+
+    @Test
+    public void test_aNameIdWithALineSeparatorIsRefused() throws Exception {
+        assertNameIdRefused("ali\u2028ce@example.com", "U+2028");
+    }
+
+    @Test
+    public void test_aNameIdWithAParagraphSeparatorIsRefused() throws Exception {
+        assertNameIdRefused("ali\u2029ce@example.com", "U+2029");
+    }
+
+    @Test
+    public void test_aNameIdWithSpacesAndPunctuationIsKeptExactly() throws Exception {
+        assertNameIdKept("first last@example.com");
+    }
+
+    @Test
+    public void test_aNameIdWithAnApostropheAndAPlusIsKeptExactly() throws Exception {
+        assertNameIdKept("o'brien+tag@example.com");
+    }
+
+    @Test
+    public void test_aNameIdWithLettersOfOtherScriptsIsKeptExactly() throws Exception {
+        assertNameIdKept("Zo\u00eb \u5c71\u7530 \u592a\u90ce");
+    }
+
+    @Test
+    public void test_aNameIdWithANoBreakSpaceAndASupplementaryCharacterIsKeptExactly() throws Exception {
+        assertNameIdKept("a\u00a0b\uD83D\uDE00@example.com");
+    }
+
     @Test
     public void test_groupsAndRolesComeFromTheConfiguredAttributes() throws Exception {
         final SamlAuthenticator authenticator = createAuthenticatorWithControlledClock();
