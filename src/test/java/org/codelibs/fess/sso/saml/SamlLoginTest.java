@@ -185,8 +185,8 @@ public class SamlLoginTest extends SamlTestCase {
             assertNull(authenticator.getLoginCredential());
 
             assertEquals(1, appender.warnings().size(), String.valueOf(appender.warnings()));
-            assertTrue(appender.warnings().get(0), appender.warnings().get(0).contains("no matching AuthnRequest ID"));
-            assertTrue(appender.warnings().get(0), appender.warnings().get(0).contains("(1 pending)"));
+            assertTrue(appender.warnings().get(0), appender.warnings().get(0).contains("WRONG_IN_RESPONSE_TO"));
+            assertTrue(appender.warnings().get(0), appender.warnings().get(0).contains("(1 pending AuthnRequest ID(s) in the session)"));
             appender.eventsAt(Level.WARN).forEach(e -> assertNull(e.getThrown(), String.valueOf(e.getThrown())));
             // and the login that is in flight is not burnt by it
             Assertions.assertEquals(Set.of(requestId), pendingRequestIds(request.getSession(false)));
