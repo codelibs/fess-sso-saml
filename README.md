@@ -101,8 +101,9 @@ HTTP this setting makes it impossible to log in at all.
 With `FESS_SESSION_STORE=opensearch` (Fess keeps the HTTP sessions in OpenSearch) a login can start on
 one node and finish on another, and the logged-in user is shared. The plugin stores the NameID, the
 groups and roles, and the session index, NameID format and qualifiers that single logout needs; the
-permissions are derived again on each node and the assertion is never stored. Use the same plugins on
-every node. Without the store, SAML needs sticky sessions as before.
+permissions are derived again on each node and the assertion is never stored. Use the same plugins, 15.10,
+on every node: adding or removing an SSO plugin invalidates the stored sessions, and users log in again.
+Without the store, SAML needs sticky sessions as before.
 
 An AuthnRequest ID is consumed once per session, but the store is last-writer-wins: two nodes that
 answer the same assertion at the same moment can both accept it, and the node that finishes later can
